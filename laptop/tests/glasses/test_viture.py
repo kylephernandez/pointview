@@ -76,10 +76,10 @@ def test_import_is_safe_and_load_fails_clearly_off_windows():
         sdk.load_library()
 
 
-def test_start_without_product_id_clear_error(monkeypatch):
+def test_start_without_product_id_and_no_glasses_clear_error(monkeypatch):
     monkeypatch.delenv("VITURE_PRODUCT_ID", raising=False)
-    with pytest.raises(sdk.SdkError, match="product id"):
-        VitureGlasses().start()
+    with pytest.raises(sdk.SdkError, match="No VITURE glasses found"):
+        VitureGlasses(_lib=FakeLib()).start()  # off Windows nothing is detected
 
 
 def test_start_without_dll_clear_error():
@@ -289,3 +289,23 @@ def test_invalid_product_id_rejected_before_create():
     with pytest.raises(sdk.SdkError, match="0x1234"):
         g.start()
     assert "create" not in lib.calls
+
+
+def test_product_id_autodetect_from_windows_instance_ids():
+    from pointview.glasses.viture import parse_viture_pids, pick_product_id
+
+    # Real output from a Luma Ultra on Windows (2026-10-26).
+    ids = """USB\\VID_35CA&PID_1102&MI_02\\7&315633E2&0&0002
+USB\\VID_35CA&PID_1104\\6&61DBEA8&0&1
+HID\\VID_35CA&PID_1102&MI_04\\8&DF0244&0&0000
+USB\\VID_35CA&PID_1102&MI_03\\7&315633E2&0&0003
+USB\\VID_35CA&PID_1102\\1234333333
+USB\\VID_35CA&PID_1102&MI_04\\7&315633E2&0&0004
+HID\\VID_35CA&PID_1102&MI_03\\8&18A28E89&0&0000
+USB\\VID_35CA&PID_1102&MI_00\\7&315633E2&0&0000"""
+    assert parse_viture_pids(ids) == [0x1102, 0x1104]
+    lib = FakeLib()
+    lib.xr_device_provider_is_product_id_valid = lambda pid: int(pid == 0x1104)
+    assert pick_product_id([0x1102, 0x1104], sdk.SdkBindings(lib)) == 0x1104
+    with pytest.raises(sdk.SdkError, match="No VITURE glasses found"):
+        pick_product_id([], sdk.SdkBindings(lib))

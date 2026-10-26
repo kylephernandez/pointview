@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -82,6 +84,60 @@ def _open_capture(index: int) -> cv2.VideoCapture:
                 return cap
             cap.release()
     return cv2.VideoCapture(index)
+
+
+VITURE_VID = 0x35CA
+_PID_RE = re.compile(r"VID_35CA&PID_([0-9A-F]{4})", re.IGNORECASE)
+
+
+def parse_viture_pids(instance_ids: str) -> list[int]:
+    """VITURE product ids in Windows device instance ids, the one with most interfaces first."""
+    counts: dict[int, int] = {}
+    for m in _PID_RE.finditer(instance_ids):
+        pid = int(m.group(1), 16)
+        counts[pid] = counts.get(pid, 0) + 1
+    return sorted(counts, key=lambda p: -counts[p])
+
+
+def connected_viture_pids() -> list[int]:
+    """Product ids of VITURE USB devices Windows sees right now (empty elsewhere / on error)."""
+    if os.name != "nt":
+        return []
+    cmd = (
+        "Get-PnpDevice -PresentOnly | Where-Object InstanceId -match 'VID_35CA' | "
+        "ForEach-Object InstanceId"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        log.warning("could not list USB devices to find the glasses", exc_info=True)
+        return []
+    return parse_viture_pids(out)
+
+
+def pick_product_id(found: list[int], bindings: sdk.SdkBindings) -> int:
+    """First connected VITURE product id the SDK accepts (docs: validate before create)."""
+    for pid in found:
+        if bindings.product_id_valid(pid) is not False:
+            log.info(
+                "using VITURE glasses product id %#06x (found %s)", pid, [hex(p) for p in found]
+            )
+            return pid
+    if found:
+        raise sdk.SdkError(
+            f"VITURE USB devices found ({', '.join(hex(p) for p in found)}) but the SDK accepts "
+            "none of them. Set VITURE_PRODUCT_ID to override."
+        )
+    raise sdk.SdkError(
+        "No VITURE glasses found on USB (no device with VID_35CA). Plug them straight into the "
+        "laptop's DP Alt Mode USB-C port with the cable that came with them, check the display "
+        "turns on, then retry. Or set VITURE_PRODUCT_ID."
+    )
 
 
 class VitureGlasses:
@@ -152,12 +208,6 @@ class VitureGlasses:
     def start(self) -> None:
         if self._started:
             return
-        if self._product_id is None:
-            raise sdk.SdkError(
-                "The glasses' USB product id is required: pass product_id= or set the "
-                "VITURE_PRODUCT_ID environment variable (the SDK page does not list it; find it "
-                "in Device Manager > glasses > Details > Hardware Ids, VID_35CA&PID_xxxx)."
-            )
         lib = (
             self._injected_lib
             if self._injected_lib is not None
@@ -166,6 +216,8 @@ class VitureGlasses:
         b = sdk.SdkBindings(lib)
         self._bindings = b
         self._stop.clear()
+        if self._product_id is None:
+            self._product_id = pick_product_id(connected_viture_pids(), b)
         if b.product_id_valid(self._product_id) is False:
             raise sdk.SdkError(
                 f"The SDK does not recognise product id {self._product_id:#06x} "
