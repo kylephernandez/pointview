@@ -1,0 +1,48 @@
+{
+  "version": 0.6,
+  "generator": "HAND-WRITTEN PointView test fixture (not recorded from Overpass)",
+  "osm3s": {
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "way", "id": 900000001,
+      "center": {"lat": 37.81972222, "lon": -122.47861111},
+      "tags": {"name": "Golden Gate Bridge", "tourism": "attraction",
+               "wikipedia": "en:Golden Gate Bridge", "wikidata": "Q44440"}
+    },
+    {
+      "type": "way", "id": 900000002,
+      "center": {"lat": 37.8106, "lon": -122.4770},
+      "tags": {"name": "Fort Point", "historic": "fort", "building": "yes",
+               "wikipedia": "en:Fort Point, San Francisco"}
+    },
+    {
+      "type": "way", "id": 900000003,
+      "center": {"lat": 37.8029, "lon": -122.4484},
+      "tags": {"name": "Palace of Fine Arts", "tourism": "attraction", "building": "yes",
+               "wikipedia": "en:Palace of Fine Arts"}
+    },
+    {
+      "type": "relation", "id": 900000005,
+      "center": {"lat": 37.8057, "lon": -122.4640},
+      "tags": {"name": "Crissy Field", "tourism": "attraction", "wikipedia": "en:Crissy Field"}
+    },
+    {
+      "type": "node", "id": 900000004, "lat": 37.8110, "lon": -122.4768,
+      "tags": {"name": "Torpedo Wharf", "historic": "yes"}
+    },
+    {
+      "type": "node", "id": 900000006, "lat": 37.8077, "lon": -122.4640,
+      "tags": {"name": "Presidio Yacht Club", "building": "yes"}
+    },
+    {
+      "type": "node", "id": 900000007, "lat": 37.8065, "lon": -122.4672,
+      "tags": {"highway": "bus_stop"}
+    },
+    {
+      "type": "node", "id": 900000008, "lat": 37.8267, "lon": -122.4230,
+      "tags": {"name": "Alcatraz Island (outside the 2 km radius)", "historic": "yes"}
+    }
+  ]
+}
