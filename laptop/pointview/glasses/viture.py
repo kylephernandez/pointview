@@ -216,14 +216,14 @@ class VitureGlasses:
         b = sdk.SdkBindings(lib)
         self._bindings = b
         self._stop.clear()
+        if self._product_id is not None and b.product_id_valid(self._product_id) is False:
+            log.warning(
+                "the SDK rejects product id %#06x (VITURE_PRODUCT_ID?); detecting instead",
+                self._product_id,
+            )
+            self._product_id = None
         if self._product_id is None:
             self._product_id = pick_product_id(connected_viture_pids(), b)
-        if b.product_id_valid(self._product_id) is False:
-            raise sdk.SdkError(
-                f"The SDK does not recognise product id {self._product_id:#06x} "
-                "(xr_device_provider_is_product_id_valid). Check VITURE_PRODUCT_ID against "
-                "Device Manager: VID_35CA&PID_xxxx."
-            )
         handle = b.create(self._product_id)
         try:
             b.set_dof_type(handle, self._six_dof)  # docs: after create, before initialize

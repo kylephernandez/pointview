@@ -282,13 +282,18 @@ def test_usb_unavailable_explains_likely_fixes():
         g.start()
 
 
-def test_invalid_product_id_rejected_before_create():
+def test_invalid_product_id_falls_back_to_detection(monkeypatch):
+    from pointview.glasses import viture
+
     lib = FakeLib()
-    lib.xr_device_provider_is_product_id_valid = lambda pid: 0
-    g = VitureGlasses(product_id=0x1234, _lib=lib)
-    with pytest.raises(sdk.SdkError, match="0x1234"):
-        g.start()
-    assert "create" not in lib.calls
+    lib.xr_device_provider_is_product_id_valid = lambda pid: int(pid == 0x1104)
+    monkeypatch.setattr(viture, "connected_viture_pids", lambda: [0x1102, 0x1104])
+    g = VitureGlasses(product_id=0x1102, _lib=lib)
+    g.start()
+    try:
+        assert g._product_id == 0x1104 and "create" in lib.calls
+    finally:
+        g.stop()
 
 
 def test_product_id_autodetect_from_windows_instance_ids():
