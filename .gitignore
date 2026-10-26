@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+laptop/test-output/
+laptop/models/*.onnx
+laptop/cache/
+*.sqlite
+node_modules/
+.DS_Store
