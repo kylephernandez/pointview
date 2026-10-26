@@ -97,7 +97,9 @@ def entity_tag_text(e: Entity) -> str:
     return f"{e.label} · {dist}" if dist else e.label
 
 
-def info_for(e: Entity, summary_lines: Sequence[str] = (), footer: str | None = None) -> InfoContent:
+def info_for(
+    e: Entity, summary_lines: Sequence[str] = (), footer: str | None = None
+) -> InfoContent:
     """Card content per the design doc: vehicles type + distance; people "person" + distance only;
     landmarks name, distance and up to two summary lines."""
     dist = format_distance(e.distance_m)
@@ -155,7 +157,12 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         color = CLASS_COLORS[e.kind]
         hl = e.id == inp.snapped_id
         p = world.project_to_display(
-            e.world_yaw_deg, e.world_pitch_deg, inp.head_quat, north, inp.display_size, inp.display_fov_deg
+            e.world_yaw_deg,
+            e.world_pitch_deg,
+            inp.head_quat,
+            north,
+            inp.display_size,
+            inp.display_fov_deg,
         )
         if e.kind == "landmark":
             if p.in_front and p.on_screen:
@@ -213,13 +220,19 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         x = _clamp(ax + 24, 10, w - CARD_W_PX - 10)
         y = _clamp(ay, 10, h - card_h - 10)
         kind_color = next(
-            (CLASS_COLORS[e.kind] for e in inp.entities if e.id == inp.info.entity_id), POINTER_COLOR
+            (CLASS_COLORS[e.kind] for e in inp.entities if e.id == inp.info.entity_id),
+            POINTER_COLOR,
         )
         items.append(InfoCard(x, y, inp.info.title, inp.info.lines, kind_color, inp.info.footer))
 
     if inp.pointer is not None:
         p = world.project_to_display(
-            inp.pointer[0], inp.pointer[1], inp.head_quat, north, inp.display_size, inp.display_fov_deg
+            inp.pointer[0],
+            inp.pointer[1],
+            inp.head_quat,
+            north,
+            inp.display_size,
+            inp.display_fov_deg,
         )
         if p.in_front:
             # Off-screen pointers stick to the display edge so you can find them.

@@ -28,8 +28,7 @@ LANDMARK_ONLY = frozenset({"landmark"})
 
 
 @pytest.fixture(autouse=True)
-def _world_and_caches(monkeypatch):
-    _world_ref.install(monkeypatch)  # lead: drop after merging W3 (world.py bodies)
+def _fresh_caches(monkeypatch):
     monkeypatch.setattr(landmarks, "_memory_cache", {})
     monkeypatch.setattr(landmarks, "_default_cache", None)
 
