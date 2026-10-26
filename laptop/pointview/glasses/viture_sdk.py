@@ -67,6 +67,8 @@ from pointview.interfaces import Quat
 log = logging.getLogger(__name__)
 
 DLL_NAME = "libglasses.dll"
+#: Names the SDK DLL may have. The Windows SDK ships ``glasses.lib``, whose DLL is ``glasses.dll``.
+DLL_NAMES = ("glasses.dll", "libglasses.dll")
 VITURE_USB_VID = 0x35CA  # documented
 VITURE_GLASSES_SUCCESS = 0  # documented
 
@@ -141,26 +143,40 @@ def load_library(sdk_path: Path | None = None) -> Any:
             "The VITURE SDK binding targets Windows x86_64 (libglasses.dll); this OS is "
             f"{os.name!r}. Use MockGlasses off Windows."
         )
-    candidates: list[str] = []
+    root: Path | None = None
     if sdk_path is not None:
-        p = Path(sdk_path)
-        candidates.append(str(p / DLL_NAME if p.is_dir() else p))
-        if p.is_dir() and hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(str(p))
+        root = Path(sdk_path)
     elif os.environ.get("VITURE_SDK_PATH"):
-        p = Path(os.environ["VITURE_SDK_PATH"])
-        candidates.append(str(p / DLL_NAME if p.is_dir() else p))
-    candidates.append(DLL_NAME)  # system / PATH / application directory
+        root = Path(os.environ["VITURE_SDK_PATH"])
+    candidates: list[Path | str] = []
+    if root is not None and root.is_file():
+        candidates.append(root)
+    elif root is not None and root.is_dir():
+        # The DLL may sit in a subfolder (bin/, lib/x64/ ...): search the whole SDK folder.
+        candidates += [f for name in DLL_NAMES for f in sorted(root.rglob(name))]
+    candidates += list(DLL_NAMES)  # system / PATH / application directory
     errors = []
     for c in candidates:
         try:
-            return ctypes.CDLL(c)
+            if isinstance(c, Path) and hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(str(c.parent))  # its dependent DLLs live next to it
+            return ctypes.CDLL(str(c))
         except OSError as e:
             errors.append(f"{c}: {e}")
+    hint = ""
+    if root is not None and root.is_dir() and not any(isinstance(c, Path) for c in candidates):
+        libs = sorted(str(f.relative_to(root)) for f in root.rglob("*.lib"))
+        if libs:
+            hint = (
+                f" The SDK folder has {', '.join(libs)} but no {' / '.join(DLL_NAMES)}: run "
+                "tools/inspect_sdk_lib.py on the .lib to see whether it is an import library "
+                "(then the DLL is missing from the download) or a static library (then a small "
+                "C++ wrapper DLL is needed)."
+            )
     raise SdkError(
-        "Could not load the VITURE SDK (libglasses.dll). Download the Windows x86_64 SDK from "
-        "https://www.viture.com/developer/glasses-sdk/glasses and pass sdk_path= or set "
-        "VITURE_SDK_PATH. Tried: " + "; ".join(errors)
+        f"Could not load the VITURE SDK ({' / '.join(DLL_NAMES)}). Download the Windows x86_64 "
+        "SDK from https://www.viture.com/developer/glasses-sdk/glasses and pass sdk_path= or set "
+        "VITURE_SDK_PATH to its folder. Tried: " + "; ".join(errors) + hint
     )
 
 

@@ -134,3 +134,14 @@ def test_phone_monitor_with_fake_phone():
     out, _ = mon.communicate(timeout=30)
     assert fake.returncode == 0, fake.stderr
     assert "Hz" in out and "summary: messages" in out and "invalid 0" in out
+
+
+def test_inspect_sdk_lib_verdicts():
+    ins = load_tool("inspect_sdk_lib").inspect
+    imp = b"!<arch>\n/ \x00__imp_xr_device_provider_create\x00glasses.dll\x00get_gl_pose_carina\x00"
+    v = ins(imp)
+    assert v["verdict"].startswith("import library") and v["dlls"] == ["glasses.dll"]
+    assert "xr_device_provider_create" in v["api"]
+    static = b"!<arch>\n/ \x00provider.obj/\x00xr_device_provider_create\x00"
+    assert ins(static)["verdict"].startswith("static library")
+    assert ins(b"MZ...")["verdict"].startswith("not a COFF")
