@@ -38,7 +38,13 @@ LANDMARK_TEXT_RISE_PX = 110
 LANDMARK_LEVEL_PX = 40
 LANDMARK_MIN_GAP_PX = 260
 EDGE_INSET_PX = 30
+EDGE_ARROW_STACK_PX = 44
+#: Info card starts this far below a landmark name's baseline.
+CARD_GAP_PX = 24
 CARD_W_PX = 560
+#: Rough 28 px tag text metrics, for decluttering (the renderer measures exactly when drawing).
+TAG_CHAR_W_PX = 15.0
+TAG_H_PX = 34.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +147,10 @@ def _status_items(s: Status) -> StatusCorner:
     return StatusCorner(tuple(lines))
 
 
+def _overlaps(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
@@ -153,6 +163,8 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
     anchors: dict[str, tuple[float, float]] = {}
 
     landmarks: list[tuple[float, float, Entity]] = []
+    arrows: list[tuple[bool, float, Entity]] = []
+    tags: list[tuple[bool, float, float, float, Entity]] = []
     for e in inp.entities:
         color = CLASS_COLORS[e.kind]
         hl = e.id == inp.snapped_id
@@ -173,17 +185,7 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
             )
             # Edge arrows only for landmarks *just* out of view, horizontally.
             if in_front and half_h_fov < abs(alpha) <= half_h_fov + EDGE_ARROW_MARGIN_DEG:
-                right = alpha > 0
-                y = _clamp(p.y, h * 0.3, h * 0.7)
-                items.append(
-                    EdgeArrow(
-                        w - EDGE_INSET_PX if right else EDGE_INSET_PX,
-                        y,
-                        0.0 if right else 180.0,
-                        e.label,
-                        color,
-                    )
-                )
+                arrows.append((alpha > 0, _clamp(p.y, h * 0.3, h * 0.7), e))
             continue
         if not (p.in_front and p.on_screen):
             continue
@@ -192,8 +194,31 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         bh = world.angular_size_to_px(size.h, inp.display_size, inp.display_fov_deg) if size else 60
         bw, bh = max(bw, 24.0), max(bh, 24.0)
         items.append(Brackets(p.x - bw / 2, p.y - bh / 2, bw, bh, color, hl))
-        items.append(Tag(p.x, p.y - bh / 2 - 8, entity_tag_text(e), color, hl))
+        tags.append((hl, e.distance_m or 1e9, p.x, p.y - bh / 2 - 8, e))
         anchors[e.id] = (p.x + bw / 2, p.y - bh / 2)
+
+    # Tags: the selected one first, then nearest first; skip a tag that would overprint a placed one
+    # (its brackets still show). Keep tags inside the display.
+    placed: list[tuple[float, float, float, float]] = []
+    for hl, _d, x, y, e in sorted(tags, key=lambda t: (not t[0], t[1])):
+        text = entity_tag_text(e)
+        tw, th = len(text) * TAG_CHAR_W_PX, TAG_H_PX
+        x = _clamp(x, tw / 2 + 8, w - tw / 2 - 8)
+        y = _clamp(y, th + 4, h - 4)
+        box = (x - tw / 2, y - th, x + tw / 2, y)
+        if not hl and any(_overlaps(box, b) for b in placed):
+            continue
+        placed.append(box)
+        items.append(Tag(x, y, text, CLASS_COLORS[e.kind], hl))
+
+    # Edge arrows, stacked per side so neighbours don't overprint each other.
+    for right in (False, True):
+        last_y = -1e9
+        for _, y, e in sorted((a for a in arrows if a[0] == right), key=lambda a: a[1]):
+            y = max(y, last_y + EDGE_ARROW_STACK_PX)
+            last_y = y
+            x = w - EDGE_INSET_PX if right else EDGE_INSET_PX
+            items.append(EdgeArrow(x, y, 0.0 if right else 180.0, e.label, CLASS_COLORS[e.kind]))
 
     # Landmark names above the horizon; stagger neighbours vertically so names don't overlap.
     landmarks.sort(key=lambda t: t[0])
@@ -208,7 +233,7 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         dist = format_distance(e.distance_m)
         text = f"{e.label} · {dist}" if dist and hl else e.label
         items.append(LandmarkLabel(x, y_text, y, text, CLASS_COLORS["landmark"], hl))
-        anchors[e.id] = (x + 20, y_text)
+        anchors[e.id] = (x + 20, y_text + CARD_GAP_PX)
 
     if inp.show_crosshair:
         items.append(Crosshair(w / 2, h / 2))
