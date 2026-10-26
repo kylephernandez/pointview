@@ -180,6 +180,23 @@ def load_library(sdk_path: Path | None = None) -> Any:
     )
 
 
+#: Result codes from VITURE's SDK documentation.
+RESULT_CODES = {
+    0: "success",
+    -1: "invalid parameter",
+    -2: "USB not connected or not accessible",
+    -3: "USB read/write failed",
+    -4: "not supported on this device",
+    -5: "no response from the device",
+}
+USB_UNAVAILABLE_HINT = (
+    " Check: (1) the USB driver is installed: VITURE's docs say it comes with 'SpaceWalker for "
+    "Windows'; (2) no other app (SpaceWalker, the VITURE web updater) is using the glasses: quit it; "
+    "(3) the glasses are plugged straight into the laptop's DP Alt Mode USB-C port, not a hub or "
+    "dock, and the display works; (4) VITURE_PRODUCT_ID matches the glasses' PID_xxxx."
+)
+
+
 class SdkBindings:
     """Thin typed wrapper over a loaded library object (a ``ctypes.CDLL`` or a test fake).
 
@@ -212,8 +229,16 @@ class SdkBindings:
 
     def _check(self, name: str, rc: int) -> int:
         if rc != VITURE_GLASSES_SUCCESS:
-            raise SdkError(f"{name} failed with VITURE result code {rc}")
+            meaning = RESULT_CODES.get(rc, "unknown")
+            hint = USB_UNAVAILABLE_HINT if rc == -2 else ""
+            raise SdkError(f"{name} failed with VITURE result code {rc} ({meaning}).{hint}")
         return rc
+
+    def product_id_valid(self, product_id: int) -> bool | None:
+        """The SDK's own check; None if this SDK build does not export it."""
+        if not self.has("xr_device_provider_is_product_id_valid"):
+            return None
+        return bool(self._fn("xr_device_provider_is_product_id_valid")(product_id))
 
     # --- device provider -------------------------------------------------------------------
 

@@ -272,3 +272,20 @@ def test_opencv_camera_missing_index_raises_and_cleans_up():
     with pytest.raises(sdk.SdkError, match="camera index"):
         g.start()
     assert lib.calls[-1] == "destroy"
+
+
+def test_usb_unavailable_explains_likely_fixes():
+    lib = FakeLib()
+    lib.xr_device_provider_initialize = lambda h, a, b: -2
+    g = VitureGlasses(product_id=PID, _lib=lib)
+    with pytest.raises(sdk.SdkError, match=r"USB not connected.*SpaceWalker for Windows"):
+        g.start()
+
+
+def test_invalid_product_id_rejected_before_create():
+    lib = FakeLib()
+    lib.xr_device_provider_is_product_id_valid = lambda pid: 0
+    g = VitureGlasses(product_id=0x1234, _lib=lib)
+    with pytest.raises(sdk.SdkError, match="0x1234"):
+        g.start()
+    assert "create" not in lib.calls
