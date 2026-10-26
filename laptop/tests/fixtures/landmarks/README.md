@@ -26,6 +26,7 @@ A recorded response should replace it the first time someone has a machine that 
 * `mock_transport.py`: `FixtureServer` serves both APIs through `httpx.MockTransport`.
   ```python
   from tests.fixtures.landmarks.mock_transport import FixtureServer, PHONE_LAT, PHONE_LON
+
   server = FixtureServer()
   layer = LandmarkLayer(tmp_path / "cache.sqlite", client=server.client())
   ```
@@ -38,4 +39,9 @@ A recorded response should replace it the first time someone has a machine that 
 
 ## Tags with a recorded summary
 
-See `wikipedia/`; the file name is the `wikipedia` tag, percent-encoded with `%` replaced by `_`.
+Only **`en:Golden Gate Bridge`** is recorded. The recorder was rate limited (HTTP 429/403 from
+Wikimedia, shared egress IP) for the rest of the session, so `en:Fort Point, San Francisco`,
+`en:Palace of Fine Arts` and `en:Crissy Field` have no summary fixture: `FixtureServer` answers 404 for
+them (which also exercises the "no summary" path). Re-run `python record_wikipedia.py` from a
+less throttled network to add them; no test needs to change. The file name is the `wikipedia` tag,
+percent-encoded with `%` replaced by `_`.
