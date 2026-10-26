@@ -65,7 +65,7 @@ through unchanged.
 | `pointview/landmarks.py` | W6 | `LandmarkLayer` (a `Layer`), Wikipedia lookup, attribution |
 | `pointview/render.py` | W6 | `QtRenderer` (a `Renderer`) + offscreen `render_to_image` |
 | `phone/` (except `src/protocol.ts`) | W4 | Expo Go app |
-| `pointview/__main__.py`, `pointview/scene.py` | lead | Main loop; turns entities, the pointer and the selection into `DrawItem`s |
+| `pointview/__main__.py`, `app.py`, `scene.py`, `mock.py`, `calibration.py` | lead | CLI and main loop (`app.py`), entities + pointer + selection → `DrawItem`s (`scene.py`), `--mock` wiring, calibration files |
 
 ### 3.1 GlassesSource (W1)
 

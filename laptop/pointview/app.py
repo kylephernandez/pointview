@@ -66,6 +66,7 @@ class RunStats:
     info_titles: set[str] = field(default_factory=set)
     buttons: list[str] = field(default_factory=list)
     fps: float = 0.0
+    detections_per_s: float = 0.0
 
 
 class PointViewApp:

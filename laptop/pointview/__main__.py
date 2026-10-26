@@ -18,6 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from pointview.app import PointViewApp, RunStats
+from pointview.calibration import load_intrinsics, parse_camera_offset
 from pointview.interfaces import InfoCard, Layer
 
 log = logging.getLogger("pointview")
@@ -46,6 +47,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--screen-index", type=int)
     p.add_argument(
         "--camera-index", type=int, help="OpenCV camera index instead of SDK pass-through"
+    )
+    p.add_argument(
+        "--intrinsics", type=Path, help="camera intrinsics JSON (tools/calibrate_camera.py)"
+    )
+    p.add_argument(
+        "--camera-offset",
+        help="camera-to-display offset yaw,pitch[,roll] in degrees (checklist M1)",
+    )
+    p.add_argument(
+        "--exposure-latency-ms", type=float, default=30.0, help="frame time = arrival − this"
     )
     p.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     p.add_argument("--no-detection", action="store_true")
@@ -79,7 +90,14 @@ def run(args: argparse.Namespace) -> RunStats:
     else:
         from pointview.glasses import VitureGlasses
 
-        glasses = VitureGlasses(camera_index=args.camera_index)
+        intrinsics = load_intrinsics(args.intrinsics) if args.intrinsics else None
+        glasses = VitureGlasses(
+            camera_index=args.camera_index,
+            intrinsics=intrinsics,
+            exposure_latency_s=args.exposure_latency_ms / 1000,
+        )
+        if intrinsics is None:
+            log.warning("camera intrinsics are assumed (90° FOV); calibrate: checklist step M1")
         phone = PhoneLinkThread(port=args.port)
 
     if not args.no_detection:
@@ -103,7 +121,14 @@ def run(args: argparse.Namespace) -> RunStats:
         layers.append(landmark_layer)
 
     renderer = render.QtRenderer(args.screen, args.screen_index, glasses.display_size, pump=False)
-    app = PointViewApp(glasses, layers, phone, renderer, landmark_layer=landmark_layer)
+    app = PointViewApp(
+        glasses,
+        layers,
+        phone,
+        renderer,
+        calibration=parse_camera_offset(args.camera_offset),
+        landmark_layer=landmark_layer,
+    )
 
     glasses.start()
     phone.start()
@@ -161,6 +186,16 @@ def run(args: argparse.Namespace) -> RunStats:
             log.error("fake phone failed: %r", fake.error)
     if shots:
         render.save_png(app.items, shots / "last.png", glasses.display_size)
+    elapsed = time.monotonic() - t_start
+    for layer in layers:
+        n = getattr(layer, "frames_processed", None)
+        if n is not None and elapsed > 0:
+            app.stats.detections_per_s = n / elapsed
+            log.info(
+                "detection: %.1f frames/s, last inference %s s",
+                n / elapsed,
+                getattr(layer, "last_inference_s", None),
+            )
     return app.stats
 
 
