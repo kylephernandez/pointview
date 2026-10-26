@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "pointview"
 version = "0.1.0"
 description = "Real-world labels for VITURE Luma Ultra glasses, with an iPhone pointer"
-readme = "../README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
 dependencies = [
