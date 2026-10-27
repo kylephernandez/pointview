@@ -17,6 +17,7 @@ dependencies = [
   "websockets>=13",
   "httpx>=0.27",
   "jsonschema>=4.22",
+  "sgp4>=2.23",
 ]
 
 [project.optional-dependencies]

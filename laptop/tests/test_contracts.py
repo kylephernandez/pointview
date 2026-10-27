@@ -46,3 +46,14 @@ def test_fixtures_consistent(scene, pose_track, fixture_intrinsics, sample_video
     assert len(pose_track) == 2001 and pose_track[0].t == 0.0
     assert fixture_intrinsics.width == scene["video"]["width"] == 960
     assert interfaces.MIN_TEXT_PX == 24
+
+
+def test_v2_phone_fields(phone_messages):
+    v = jsonschema.Draft202012Validator(load("phone_message"))
+    good = phone_messages[1]
+    assert v.is_valid({**good, "look": "nvg", "passthrough": True, "layers": {"aircraft": False}})
+    assert not v.is_valid({**good, "look": "sepia"})
+    assert set(interfaces.LAYER_KINDS) == set(
+        load("phone_message")["properties"]["layers"]["properties"]
+    )
+    assert interfaces.PhoneState.__dataclass_fields__["look"].default == "normal"

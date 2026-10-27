@@ -1,5 +1,6 @@
 // Builds schema-valid PhoneMessage objects from the latest sensor state.
 import {
+  LAYER_NAMES,
   PROTOCOL_VERSION,
   type ButtonName,
   type LayerName,
@@ -22,7 +23,7 @@ export type FullLayers = Record<LayerName, boolean>;
 
 export class MessageBuilder {
   private buttons: ButtonName[] = [];
-  private layers: FullLayers = { people: true, vehicles: true, landmarks: true };
+  private layers: FullLayers = Object.fromEntries(LAYER_NAMES.map((n) => [n, true])) as FullLayers;
   private layersDirty = true;
   private lastLayersSentAt = -Infinity;
   private lat: number | null = null;

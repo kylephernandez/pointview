@@ -5,22 +5,69 @@
   "description": "Sent by the laptop on the same WebSocket. See docs/phone-protocol.md.",
   "oneOf": [
     {
-      "type": "object", "additionalProperties": false,
-      "required": ["type", "style"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "style"
+      ],
       "properties": {
-        "type": { "const": "haptic" },
-        "style": { "enum": ["snap", "select", "align_ok", "error"] }
+        "type": {
+          "const": "haptic"
+        },
+        "style": {
+          "enum": [
+            "snap",
+            "select",
+            "align_ok",
+            "error"
+          ]
+        }
       }
     },
     {
-      "type": "object", "additionalProperties": false,
-      "required": ["type", "aligned", "selected"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "aligned",
+        "selected"
+      ],
       "properties": {
-        "type": { "const": "status" },
-        "aligned": { "type": "boolean" },
-        "selected": { "type": ["string", "null"], "description": "Label of the snapped item, if any." },
-        "fps": { "type": "number", "minimum": 0 },
-        "message": { "type": "string", "maxLength": 200 }
+        "type": {
+          "const": "status"
+        },
+        "aligned": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Label of the snapped item, if any."
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "look": {
+          "enum": [
+            "normal",
+            "crt",
+            "nvg",
+            "flir",
+            "noir",
+            "snow"
+          ]
+        },
+        "passthrough": {
+          "type": "boolean"
+        }
       }
     }
   ]

@@ -464,3 +464,66 @@ def choose_snap(
     if current_d is not None and best_id != current_id and best_d > current_d - hysteresis_deg:
         return current_id
     return best_id
+
+
+# ------------------------------------------------------------------- v2: geodesy, view, backdrop
+# Signatures frozen in contract v2 (docs/contracts.md §7). Bodies are implemented by W7.
+
+WGS84_A = 6_378_137.0
+WGS84_F = 1 / 298.257223563
+
+
+def ecef_from_geodetic(lat: float, lon: float, alt_m: float = 0.0) -> Vec3:
+    """WGS84 latitude/longitude (degrees) and ellipsoidal height (m) → ECEF meters."""
+    raise NotImplementedError
+
+
+def look_angles(
+    obs_lat: float,
+    obs_lon: float,
+    obs_alt_m: float,
+    lat: float,
+    lon: float,
+    alt_m: float,
+) -> tuple[float, float, float]:
+    """Direction from an observer to a point, on the WGS84 ellipsoid (Earth curvature included).
+
+    Returns (world_yaw_deg clockwise from true north [0, 360), pitch_deg above the local horizon,
+    slant_range_m). A plane 10 km up and 50 km away comes out about 10° up; a ship 30 km away comes
+    out slightly below 0°.
+    """
+    raise NotImplementedError
+
+
+def in_view(
+    world_yaw_deg: float,
+    world_pitch_deg: float,
+    head_quat: Quat,
+    north_offset_deg: float,
+    display_fov_deg: tuple[float, float],
+    margin_deg: float = 0.0,
+) -> bool:
+    """True when the direction is in front of the viewer and within the display's FOV, widened by
+    margin_deg on every side (use a few degrees so labels don't pop at the edges)."""
+    raise NotImplementedError
+
+
+def backdrop_homography(
+    intr: CameraIntrinsics,
+    camera_to_head_quat: Quat,
+    head_quat_at_capture: Quat,
+    head_quat_now: Quat,
+    display_size: tuple[int, int],
+    display_fov_deg: tuple[float, float],
+) -> tuple[float, ...]:
+    """Row-major 3x3 mapping camera pixels to display pixels so a passthrough image lines up with
+    the world (rotation-only / far-scene model): H = K_display · R · K_camera⁻¹, where R takes
+    camera-frame rays at capture time to the head frame now (late-latching the head rotation that
+    happened since the frame was captured). Ignores lens distortion (undistort the frame first)."""
+    raise NotImplementedError
+
+
+def sun_direction(unix_time: float, lat: float, lon: float) -> tuple[float, float]:
+    """(world_yaw_deg, pitch_deg) of the Sun for an observer (low-precision almanac, ~0.5°).
+    Used for "is it dark" and "is that satellite sunlit"."""
+    raise NotImplementedError

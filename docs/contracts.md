@@ -171,3 +171,69 @@ cd ../phone && npm ci && npx tsc --noEmit && npx eslint . && npx jest
 
 `pytest` adds `laptop/` to `sys.path` (`pythonpath = ["."]`), so a venv without the editable install also
 works from any checkout or worktree.
+
+---
+
+# Contract v2: God's Eye View looks and live layers
+
+**Status: FROZEN** from the start of Phase 3. The additions below are backward compatible, so v1 code still works unchanged. They borrow from [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) (MIT, © 2026 Bilawal Sidhu): its sensor looks and its live public-data layers, brought onto the real world through the glasses. Any code or shader math ported from it keeps its copyright notice in a comment at the top of the ported file and is listed in the README.
+
+**Division of roles:**
+* **Phone:** only a pointer. It sends its rotation and compass heading, and the user picks layers and the look on it. The phone camera is never used.
+* **VITURE glasses:** the only source of imagery.
+  * The front color camera feeds detection and the passthrough backdrop.
+  * The side grayscale tracking cameras feed the NVG backdrop.
+
+## 7. Live layers and "only what you're looking at"
+
+* **New entity kinds:** `aircraft`, `satellite`, `vessel`, `event`. `entities.LIVE_KINDS` lists them. `Entity.geo` (`GeoPos`) carries a position when the layer knows one.
+* **New `LayerContext` fields:**
+  * `unix_time`: wall clock. The mock pins it to the time the fixtures were recorded.
+  * `view`: a `View` describing what the glasses face right now.
+  * `pointer`: the phone pointer's world direction.
+  * `focus_id`: the entity the pointer is snapped to.
+* **Focus rule.** These apply to live layers:
+  1. Return only entities that pass `world.in_view(…, ctx.view…, margin_deg=5)`. The app filters again, but layers should not even compute labels for other entities. Live layers get no edge arrows.
+  2. Fetch data from the network by area around `ctx.phone.lat/lon`. Feeds are queried by area, not by cone, so fetch the area and filter to the view.
+  3. Per-item enrichment (an aircraft's route or type details, a satellite's next pass, quake details) runs only for `ctx.focus_id`. Put the results in `meta`.
+  4. With no view (no head pose yet) or no GPS fix, return `[]`.
+* **Direction from a position:** use `world.look_angles(observer lat/lon/alt, target lat/lon/alt)`, which accounts for Earth curvature. The observer's altitude is 0 until the phone sends altitude.
+* **Layer modules:** each one is a `Layer` that is non-blocking, works in a background thread, and caches to SQLite like `landmarks.py`. Tests use recorded HTTP responses, never the live network.
+
+  | Module | Kind | Sources (keyless first) | Refresh |
+  | --- | --- | --- | --- |
+  | `pointview/live/aircraft.py` | aircraft | adsb.lol `/v2/point`, falling back to OpenSky `states/all` with a bounding box | 5–10 s, dead-reckoned between polls |
+  | `pointview/live/satellites.py` | satellite | CelesTrak GP (`visual`, `stations`), propagated with `sgp4` | TLEs daily, positions each frame for satellites in view |
+  | `pointview/live/events.py` | event, vessel | USGS earthquakes GeoJSON (keyless); AISStream vessels only if `AISSTREAM_API_KEY` is set | quakes every 5 min; vessels streamed |
+
+* **Phone toggles:** `aircraft`, `satellites`, `vessels`, `events`. `interfaces.LAYER_KINDS` maps toggle names to kinds.
+
+## 8. Looks and passthrough (`pointview/looks/`, `render.py`)
+
+* **Looks:** `interfaces.LOOKS` = `normal, crt, nvg, flir, noir, snow`, ported from God's Eye View's `src/styles/` (`retro.js`, `surveillance.js`, `thermal.js`, `noir.js`, `snow.js`).
+* **What a look applies to:** the whole composed frame, meaning the `Backdrop` plus the overlay.
+* **On see-through glasses black means "nothing"**, so a look has no visible effect unless passthrough is on. Labels are re-tinted in every look.
+* **`Backdrop(bgr, homography, gain)`** is drawn first. The app builds it from the passthrough camera's latest frame, using `world.backdrop_homography()` with the head pose at capture time and the pose now.
+* **Which camera:**
+  * NVG uses the tracking camera when `isinstance(glasses, TrackingCameraSource)`.
+  * Every other look, and NVG on glasses without tracking frames, uses the front camera.
+* **`Renderer.set_look(look, params)`:** `params` are each look's uniforms from God's Eye View (for example `gain`, `bloom`, `pixelation`), with God's Eye View's defaults.
+* **CPU reference:** `pointview/looks/` holds a numpy/OpenCV version of each look as a pure function on a uint8 image. It must stay within 8 ms at 960×540 internal resolution on this CPU; the renderer upscales to the display. Tests use this path.
+* **GPU path:** a GLSL path through Qt OpenGL is optional and only used when a GL context exists. It can only be verified on Windows hardware.
+* **Phone message (optional, additive, still `v: 1`):** `look` (one of `LOOKS`), `passthrough` (boolean), and the new `layers` keys. When a message omits them, the previous value stands. The laptop's status message echoes `look` and `passthrough`.
+
+## 9. Tracking cameras (`TrackingCameraSource`)
+
+* **Interface:** an optional extra protocol on a glasses source. `VitureGlasses` implements it through the Carina stereo callback (8-bit grayscale; left camera only) and the SDK's exposure control. `MockGlasses` implements it by converting its video to grayscale.
+* **Intrinsics and mounting rotation** of the tracking cameras are unknown until measured on hardware. Until then the defaults are a guessed wide field of view, about 110°, and identity mounting. They are flagged as such.
+
+## 10. world.py v2
+
+Five functions are added; their signatures are frozen and W7 implements the bodies:
+* `ecef_from_geodetic`
+* `look_angles`
+* `in_view`
+* `backdrop_homography`
+* `sun_direction`
+
+See the docstrings in `laptop/pointview/world.py`.

@@ -13,7 +13,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-EntityKind = Literal["person", "vehicle", "landmark"]
+EntityKind = Literal["person", "vehicle", "landmark", "aircraft", "satellite", "vessel", "event"]
+#: Kinds that come from live public data feeds (God's Eye View layers). They are only drawn when
+#: they are inside the glasses' view (contracts §7).
+LIVE_KINDS: frozenset[str] = frozenset({"aircraft", "satellite", "vessel", "event"})
 
 #: Detector classes we keep, mapped to their entity kind. Labels are the COCO class names.
 DETECTION_CLASSES: Mapping[str, EntityKind] = {
@@ -35,6 +38,15 @@ class SizeDeg:
 
 
 @dataclass(frozen=True, slots=True)
+class GeoPos:
+    """WGS84 position. ``alt_m`` is height above the ellipsoid (≈ above sea level for display)."""
+
+    lat: float
+    lon: float
+    alt_m: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class Entity:
     #: Stable per tracked object ("det:17") or OSM feature ("osm:node/123").
     id: str
@@ -53,3 +65,5 @@ class Entity:
     #: Free-form string metadata a layer wants to carry to the info card, e.g.
     #: {"wikipedia": "en:Golden Gate Bridge", "osm": "way/123"}. Never personal data.
     meta: Mapping[str, str] = field(default_factory=dict)
+    #: Where the thing is, when a layer knows (landmarks, aircraft, vessels, events).
+    geo: GeoPos | None = None

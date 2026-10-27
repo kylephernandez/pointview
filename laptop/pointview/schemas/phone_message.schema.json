@@ -4,36 +4,146 @@
   "title": "PointView phone → laptop sample",
   "description": "One sample from the iPhone pointer, sent about 60 times per second as a WebSocket text frame. See docs/phone-protocol.md.",
   "type": "object",
-  "required": ["v", "t_ms", "quat", "omega", "heading_deg", "heading_acc", "lat", "lon", "gps_acc", "buttons"],
+  "required": [
+    "v",
+    "t_ms",
+    "quat",
+    "omega",
+    "heading_deg",
+    "heading_acc",
+    "lat",
+    "lon",
+    "gps_acc",
+    "buttons"
+  ],
   "additionalProperties": false,
   "properties": {
-    "v": { "const": 1, "description": "Protocol version." },
-    "t_ms": { "type": "number", "minimum": 0, "description": "Phone clock when the motion sample was taken, ms since the Unix epoch (Date.now())." },
+    "v": {
+      "const": 1,
+      "description": "Protocol version."
+    },
+    "t_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Phone clock when the motion sample was taken, ms since the Unix epoch (Date.now())."
+    },
     "quat": {
       "description": "Phone attitude [w, x, y, z]: rotates phone-frame vectors (x right edge, y top edge, z out of screen) into a gravity-aligned reference frame (z up, arbitrary yaw). Unit norm (±1e-3).",
-      "type": "array", "items": { "type": "number", "minimum": -1.001, "maximum": 1.001 }, "minItems": 4, "maxItems": 4
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": -1.001,
+        "maximum": 1.001
+      },
+      "minItems": 4,
+      "maxItems": 4
     },
     "omega": {
       "description": "Rotation rate [x, y, z] in rad/s, in the phone frame.",
-      "type": "array", "items": { "type": "number", "minimum": -100, "maximum": 100 }, "minItems": 3, "maxItems": 3
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": -100,
+        "maximum": 100
+      },
+      "minItems": 3,
+      "maxItems": 3
     },
-    "heading_deg": { "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360, "description": "True heading of the top edge, degrees clockwise from north (magnetic if true is unavailable). null if unknown." },
-    "heading_acc": { "type": ["number", "null"], "minimum": 0, "description": "Heading accuracy, degrees. null if unknown." },
-    "lat": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
-    "lon": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
-    "gps_acc": { "type": ["number", "null"], "minimum": 0, "description": "Horizontal accuracy, meters. null if no fix." },
+    "heading_deg": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "exclusiveMaximum": 360,
+      "description": "True heading of the top edge, degrees clockwise from north (magnetic if true is unavailable). null if unknown."
+    },
+    "heading_acc": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Heading accuracy, degrees. null if unknown."
+    },
+    "lat": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -90,
+      "maximum": 90
+    },
+    "lon": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -180,
+      "maximum": 180
+    },
+    "gps_acc": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Horizontal accuracy, meters. null if no fix."
+    },
     "buttons": {
       "description": "Buttons pressed since the previous message, in order. Usually empty.",
-      "type": "array", "items": { "enum": ["info", "align", "align_long"] }, "maxItems": 16
+      "type": "array",
+      "items": {
+        "enum": [
+          "info",
+          "align",
+          "align_long"
+        ]
+      },
+      "maxItems": 16
     },
     "layers": {
-      "description": "Optional layer toggles. Omitted = unchanged since the last message (all on at start).",
-      "type": "object", "additionalProperties": false,
+      "description": "Optional layer toggles. Omitted = unchanged since the last message (all on at start). aircraft/satellites/vessels/events are the God's Eye View live layers.",
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "people": { "type": "boolean" },
-        "vehicles": { "type": "boolean" },
-        "landmarks": { "type": "boolean" }
+        "people": {
+          "type": "boolean"
+        },
+        "vehicles": {
+          "type": "boolean"
+        },
+        "landmarks": {
+          "type": "boolean"
+        },
+        "aircraft": {
+          "type": "boolean"
+        },
+        "satellites": {
+          "type": "boolean"
+        },
+        "vessels": {
+          "type": "boolean"
+        },
+        "events": {
+          "type": "boolean"
+        }
       }
+    },
+    "look": {
+      "enum": [
+        "normal",
+        "crt",
+        "nvg",
+        "flir",
+        "noir",
+        "snow"
+      ],
+      "description": "Optional God's Eye View sensor look. Omitted = unchanged (\"normal\" at start)."
+    },
+    "passthrough": {
+      "type": "boolean",
+      "description": "Optional: show the VITURE camera image behind the overlay. Omitted = unchanged (false at start)."
     }
   }
 }

@@ -1,3 +1,4 @@
+import { LAYER_NAMES } from '../protocol';
 import * as fs from 'fs';
 import * as path from 'path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -61,14 +62,19 @@ describe('MessageBuilder', () => {
 
   it('includes layers in the first message, then only on change or every second', () => {
     const b = new MessageBuilder(1000);
-    expect(b.build(sample(0)).layers).toEqual({ people: true, vehicles: true, landmarks: true });
+    expect(b.build(sample(0)).layers).toEqual(
+      Object.fromEntries(LAYER_NAMES.map((n) => [n, true])),
+    );
     expect(b.build(sample(16)).layers).toBeUndefined();
     expect(b.build(sample(999)).layers).toBeUndefined();
     expect(b.build(sample(1000)).layers).toBeDefined();
     expect(b.build(sample(1016)).layers).toBeUndefined();
     b.setLayer('people', false);
     const m = b.build(sample(1032));
-    expect(m.layers).toEqual({ people: false, vehicles: true, landmarks: true });
+    expect(m.layers).toEqual({
+      ...Object.fromEntries(LAYER_NAMES.map((n) => [n, true])),
+      people: false,
+    });
     expect(validate(m)).toBe(true);
     expect(b.build(sample(1048)).layers).toBeUndefined();
     b.setLayer('people', false); // same value: not a change

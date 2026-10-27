@@ -8,7 +8,26 @@ export const HOTSPOT_SCAN_RANGE = { prefix: '172.20.10.', first: 2, last: 14 } a
 export const SEND_HZ = 60;
 
 export type ButtonName = 'info' | 'align' | 'align_long';
-export type LayerName = 'people' | 'vehicles' | 'landmarks';
+export type LayerName =
+  | 'people'
+  | 'vehicles'
+  | 'landmarks'
+  | 'aircraft'
+  | 'satellites'
+  | 'vessels'
+  | 'events';
+export const LAYER_NAMES: readonly LayerName[] = [
+  'people',
+  'vehicles',
+  'landmarks',
+  'aircraft',
+  'satellites',
+  'vessels',
+  'events',
+];
+/** God's Eye View sensor looks, applied in the glasses (the phone only chooses). */
+export type Look = 'normal' | 'crt' | 'nvg' | 'flir' | 'noir' | 'snow';
+export const LOOKS: readonly Look[] = ['normal', 'crt', 'nvg', 'flir', 'noir', 'snow'];
 export type Layers = Partial<Record<LayerName, boolean>>;
 
 /** One phone → laptop sample. Field meanings and units: docs/phone-protocol.md. */
@@ -30,10 +49,22 @@ export interface PhoneMessage {
   /** Presses since the previous message. */
   buttons: ButtonName[];
   layers?: Layers;
+  /** Sent on change (and with layers); omitted = unchanged. */
+  look?: Look;
+  /** Show the VITURE camera image behind the overlay; omitted = unchanged. */
+  passthrough?: boolean;
 }
 
 export type HapticStyle = 'snap' | 'select' | 'align_ok' | 'error';
 
 export type LaptopMessage =
   | { type: 'haptic'; style: HapticStyle }
-  | { type: 'status'; aligned: boolean; selected: string | null; fps?: number; message?: string };
+  | {
+      type: 'status';
+      aligned: boolean;
+      selected: string | null;
+      fps?: number;
+      message?: string;
+      look?: Look;
+      passthrough?: boolean;
+    };

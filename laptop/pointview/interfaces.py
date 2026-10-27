@@ -22,7 +22,7 @@ All laptop times are seconds on the ``now()`` clock (``time.monotonic``).
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
@@ -109,6 +109,29 @@ class GlassesSource(Protocol):
         ...
 
 
+@runtime_checkable
+class TrackingCameraSource(Protocol):
+    """Optional extra on a GlassesSource: the Luma Ultra's side-mounted grayscale tracking cameras
+    (VIO cameras, streamed by the SDK's Carina camera callback). Used as the NVG backdrop, since they
+    may cope better with low light than the front color camera. Check with isinstance()."""
+
+    @property
+    def tracking_camera_intrinsics(self) -> CameraIntrinsics: ...
+
+    @property
+    def tracking_camera_to_head_quat(self) -> Quat:
+        """Mounting rotation of the (left) tracking camera relative to the head frame."""
+        ...
+
+    def latest_tracking_frame(self) -> Frame | None:
+        """Newest left tracking-camera frame, H x W x 3 uint8 BGR (gray replicated). Never blocks."""
+        ...
+
+    def set_tracking_exposure(self, exposure_ms: float | None, gain: float | None = None) -> None:
+        """Manual exposure (SDK range 0.01-8 ms, gain 0-15), or None for automatic."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class Calibration:
     """Fixed per-rig calibration, measured once (see docs/hardware-checklist.md)."""
@@ -136,7 +159,22 @@ class Alignment:
 # ----------------------------------------------------------------------------------------- phone
 
 ButtonName = Literal["info", "align", "align_long"]
-LayerName = Literal["people", "vehicles", "landmarks"]
+LayerName = Literal[
+    "people", "vehicles", "landmarks", "aircraft", "satellites", "vessels", "events"
+]
+#: Phone layer toggle → entity kind.
+LAYER_KINDS: dict[str, EntityKind] = {
+    "people": "person",
+    "vehicles": "vehicle",
+    "landmarks": "landmark",
+    "aircraft": "aircraft",
+    "satellites": "satellite",
+    "vessels": "vessel",
+    "events": "event",
+}
+#: God's Eye View sensor looks (contracts §8). "normal" = no post-processing.
+Look = Literal["normal", "crt", "nvg", "flir", "noir", "snow"]
+LOOKS: tuple[Look, ...] = ("normal", "crt", "nvg", "flir", "noir", "snow")
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,9 +210,11 @@ class PhoneState:
     #: Buttons pressed since the previous message, in press order.
     buttons: tuple[ButtonName, ...] = ()
     #: Layer toggles as last reported by the phone.
-    layers: dict[LayerName, bool] = field(
-        default_factory=lambda: {"people": True, "vehicles": True, "landmarks": True}
-    )
+    layers: dict[LayerName, bool] = field(default_factory=lambda: dict.fromkeys(LAYER_KINDS, True))
+    #: Sensor look chosen on the phone (persists when a message omits it).
+    look: Look = "normal"
+    #: Show the camera image behind the overlay (needed for looks to be visible).
+    passthrough: bool = False
 
 
 class PhoneLinkAPI(Protocol):
@@ -209,6 +249,18 @@ class PhoneLinkAPI(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class View:
+    """The glasses' current view. Use world.in_view() to test a direction against it."""
+
+    head_quat: Quat
+    north_offset_deg: float
+    display_fov_deg: tuple[float, float]
+    #: World direction of the view center.
+    yaw_deg: float
+    pitch_deg: float
+
+
+@dataclass(frozen=True, slots=True)
 class LayerContext:
     t: float
     glasses: GlassesSource
@@ -216,7 +268,17 @@ class LayerContext:
     calibration: Calibration
     phone: PhoneState | None
     #: Kinds the user has switched on (from the phone's toggles).
-    enabled: frozenset[EntityKind] = frozenset({"person", "vehicle", "landmark"})
+    enabled: frozenset[EntityKind] = frozenset(LAYER_KINDS.values())
+    #: Wall clock, Unix seconds (UTC). Live layers use it for propagation (orbits, dead reckoning);
+    #: the mock pins it to the fixtures' recording time.
+    unix_time: float = 0.0
+    #: Where the glasses look right now; None before the first head pose.
+    view: View | None = None
+    #: World (yaw, pitch) of the phone pointer, or None (no phone / not aligned).
+    pointer: tuple[float, float] | None = None
+    #: Id of the entity the pointer is snapped to. Layers do per-item enrichment (routes, next
+    #: pass, details) only for this one.
+    focus_id: str | None = None
 
 
 @runtime_checkable
@@ -241,6 +303,10 @@ CLASS_COLORS: dict[EntityKind, Color] = {
     "person": (255, 200, 0),  # amber
     "vehicle": (0, 220, 255),  # cyan
     "landmark": (140, 255, 120),  # green
+    "aircraft": (255, 255, 255),  # white
+    "satellite": (190, 160, 255),  # lavender
+    "vessel": (80, 170, 255),  # blue
+    "event": (255, 90, 70),  # red
 }
 POINTER_COLOR: Color = (255, 255, 255)
 STATUS_OK: Color = (120, 255, 120)
@@ -352,8 +418,23 @@ class Text:
     size_px: int = 24
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class Backdrop:
+    """A camera image drawn first, behind everything else (passthrough).
+
+    ``homography`` (row-major 3x3) maps image pixels to display pixels; world.backdrop_homography()
+    computes it so the image lines up with the real world. Black stays see-through on the glasses.
+    """
+
+    bgr: np.ndarray
+    homography: tuple[float, ...]
+    #: 0..1 brightness multiplier (night use).
+    gain: float = 1.0
+
+
 DrawItem = (
-    Brackets
+    Backdrop
+    | Brackets
     | Tag
     | LandmarkLabel
     | EdgeArrow
@@ -370,6 +451,10 @@ class Renderer(Protocol):
 
     def show(self, items: Sequence[DrawItem]) -> None:
         """Replace what is on screen with ``items`` (drawn in list order)."""
+        ...
+
+    def set_look(self, look: Look, params: Mapping[str, float] | None = None) -> None:
+        """Apply a God's Eye View sensor look to everything drawn (Backdrop and overlay)."""
         ...
 
     def close(self) -> None: ...
