@@ -11,11 +11,13 @@ from PySide6.QtGui import QFontMetrics, QGuiApplication, QImage
 from pointview import render
 from pointview.interfaces import (
     CLASS_COLORS,
+    LOOKS,
     MIN_TEXT_PX,
     POINTER_COLOR,
     STATUS_BAD,
     STATUS_OK,
     STATUS_WARN,
+    Backdrop,
     Brackets,
     Crosshair,
     EdgeArrow,
@@ -313,3 +315,206 @@ def test_qt_renderer_lifecycle_and_paint():
     r.close()
     r.close()  # idempotent
     r.show([Crosshair(1, 1)])  # no-op after close, must not raise
+
+
+# ------------------------------------------------------------------- looks and passthrough
+
+IDENT = (1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0)
+
+
+def _backdrop_square() -> Backdrop:
+    """200x100 black image with a white square at x 20..60, y 10..40, mapped by x -> 2x + 200,
+    y -> 2y + 100, so on a 960x540 display it must land at x 240..320, y 120..180."""
+    src = np.zeros((100, 200, 3), np.uint8)
+    src[10:40, 20:60] = 255
+    return Backdrop(src, (2.0, 0, 200.0, 0, 2.0, 100.0, 0, 0, 1.0))
+
+
+def test_backdrop_homography_places_pattern_normal_look():
+    img = render.render_to_image([_backdrop_square()], (960, 540))
+    assert px(img, 280, 150) == (255, 255, 255)
+    for x, y in ((230, 150), (330, 150), (280, 110), (280, 190), (10, 10), (900, 500)):
+        assert px(img, x, y) == (0, 0, 0), (x, y)
+    bb = bright_bbox(img, thresh=128)
+    assert bb is not None
+    assert all(abs(a - b) <= 2 for a, b in zip(bb, (240, 120, 319, 179), strict=True))
+
+
+def test_backdrop_homography_places_pattern_through_internal_resolution():
+    # 1920x1080 display, looks run at 960x540: the homography is scaled and must still line up.
+    bd = Backdrop(_backdrop_square().bgr, (4.0, 0, 400.0, 0, 4.0, 200.0, 0, 0, 1.0))
+    img = render.render_to_image([bd], (1920, 1080), look="noir")
+    assert min(px(img, 560, 300)) > 150
+    for x, y in ((460, 300), (660, 300), (560, 230), (560, 380), (100, 900)):
+        assert max(px(img, x, y)) < 40, (x, y)
+
+
+def test_backdrop_perspective_homography():
+    src = np.full((100, 100, 3), 255, np.uint8)
+    h = (1.0, 0.0, 100.0, 0.0, 1.0, 100.0, 0.0, 0.004, 1.0)  # w' = 1 + 0.004 y: lower rows shrink
+    a = arr(render.render_to_image([Backdrop(src, h)], (400, 300)))
+    top_row = (a[102].max(axis=1) > 128).sum()
+    bottom_row = (a[196].max(axis=1) > 128).sum()
+    assert top_row > bottom_row + 5
+    assert tuple(a[5, 5]) == (0, 0, 0)
+
+
+def test_backdrop_gain():
+    src = np.full((360, 640, 3), (50, 100, 200), np.uint8)  # BGR
+    full = render.render_to_image([Backdrop(src, IDENT)], (640, 360))
+    assert px(full, 320, 180) == (200, 100, 50)
+    half = render.render_to_image([Backdrop(src, IDENT, gain=0.5)], (640, 360))
+    assert all(abs(a - b) <= 1 for a, b in zip(px(half, 320, 180), (100, 50, 25), strict=True))
+    dark = render.render_to_image([Backdrop(src, IDENT, gain=0.0)], (640, 360))
+    assert px(dark, 320, 180) == (0, 0, 0)
+    # gain also applies when a look runs
+    lit = render.render_to_image([Backdrop(src, IDENT, gain=1.0)], (640, 360), look="noir")
+    unlit = render.render_to_image([Backdrop(src, IDENT, gain=0.2)], (640, 360), look="noir")
+    assert sum(px(lit, 320, 180)) > sum(px(unlit, 320, 180)) + 30
+
+
+def test_overlay_draws_over_backdrop():
+    src = np.full((540, 960, 3), 40, np.uint8)
+    items = [Backdrop(src, IDENT), PointerRing(480, 270, solid=True)]
+    img = render.render_to_image(items, (960, 540))
+    assert px(img, 480, 270) == POINTER_COLOR
+    assert px(img, 100, 100) == (40, 40, 40)
+
+
+def test_plain_path_is_unchanged_full_resolution_painter():
+    items = [Brackets(300, 560, 260, 170, (255, 80, 80)), Tag(430, 550, "car", (255, 80, 80))]
+    a = arr(render.render_to_image(items, SIZE))
+    ref = QImage(SIZE[0], SIZE[1], QImage.Format.Format_RGB32)
+    ref.fill(0)
+    p = render.QPainter(ref)
+    render.paint_items(p, items, SIZE)
+    p.end()
+    assert np.array_equal(a, arr(ref))
+    assert np.array_equal(a, arr(render.render_to_image(items, SIZE, look="normal")))
+
+
+def test_render_to_image_rejects_unknown_look():
+    with pytest.raises(ValueError):
+        render.render_to_image([], (320, 200), look="sepia")
+
+
+@pytest.mark.parametrize("look", [lk for lk in LOOKS if lk != "normal"])
+def test_every_look_renders_at_display_size_and_is_deterministic(look):
+    items = [Crosshair(160, 100)]
+    img = render.render_to_image(items, (320, 200), look=look, t_s=1.0)
+    assert (img.width(), img.height()) == (320, 200)
+    assert np.array_equal(arr(img), arr(render.render_to_image(items, (320, 200), look, 1.0)))
+
+
+def test_tint_color_per_look():
+    car = CLASS_COLORS["vehicle"]
+    assert render.tint_color(car, "normal") == car
+    nvg = render.tint_color(car, "nvg")
+    assert nvg[1] > 3 * nvg[0] and nvg[1] > 3 * nvg[2]  # green
+    crt = render.tint_color(car, "crt")
+    assert crt[1] > crt[0] and crt[1] > crt[2] and crt[1] > 150  # phosphor green
+    flir = render.tint_color(car, "flir")
+    assert max(flir) - min(flir) <= 1 and flir[0] > 140  # white-hot
+    iron = render.tint_color(car, "flir", {"palette": 1.0})
+    assert iron[0] > iron[1] > iron[2] and iron[0] > 140  # hot end of ironbow: yellow-white
+    noir = render.tint_color(car, "noir")
+    assert max(noir) - min(noir) <= 15
+    assert render.tint_color((20, 20, 20), "nvg")[1] >= 120  # dim colours are lifted
+
+
+@pytest.mark.parametrize(
+    ("look", "check"),
+    [
+        ("nvg", lambda r, g, b: g > 2.5 * r and g > 2.5 * b),
+        ("crt", lambda r, g, b: g > r and g > b),
+        ("flir", lambda r, g, b: abs(r - g) < 12 and abs(g - b) < 12),
+    ],
+)
+def test_labels_are_rendered_in_the_look_colour(look, check):
+    items = [
+        Brackets(800, 400, 320, 280, CLASS_COLORS["vehicle"]),
+        Tag(960, 380, "car · ~15 m", CLASS_COLORS["vehicle"]),
+        InfoCard(300, 300, "Fort Point", ("0.8 km", "Brick fort"), CLASS_COLORS["landmark"]),
+    ]
+    a = arr(render.render_to_image(items, SIZE, look=look, t_s=1.0)).astype(float)
+    lit = a.max(axis=2) > 90
+    assert lit.sum() > 200
+    r, g, b = (a[:, :, c][lit].mean() for c in range(3))
+    assert check(r, g, b), (look, r, g, b)
+
+
+@pytest.mark.parametrize("look", ["crt", "nvg", "flir", "noir", "snow"])
+def test_label_text_stays_at_least_24px_after_upscaling(look):
+    items = [Tag(960, 580, "tiny", (255, 255, 255), size_px=10)]
+    img = render.render_to_image(items, SIZE, look=look)
+    bb = bright_bbox(img, 800, 500, 1120, 620, thresh=60)
+    assert bb is not None
+    assert bb[3] - bb[1] + 1 >= 14  # x-height plus descender of a 24 px "tiny"
+
+
+def test_qt_renderer_set_look_and_passthrough():
+    r = render.QtRenderer(size=(800, 600), gpu="off")
+    src = np.full((600, 800, 3), 180, np.uint8)
+    r.set_look("nvg", {"gain": 0.8})
+    r.show([Backdrop(src, IDENT), Crosshair(400, 300)])
+    a = arr(r.grab()).astype(float)
+    cy, cx = a.shape[0] // 2, a.shape[1] // 2
+    c = a[cy - 30 : cy + 30, cx - 30 : cx + 30].reshape(-1, 3).mean(axis=0)
+    assert c[1] > 2.5 * c[0] and c[1] > 2.5 * c[2]
+    r.set_look("normal")
+    r.show([Backdrop(src, IDENT)])
+    assert tuple(int(v) for v in arr(r.grab())[cy, cx]) == (180, 180, 180)
+    r.show([])
+    assert bright_bbox(r.grab()) is None
+    with pytest.raises(ValueError):
+        r.set_look("sepia")  # type: ignore[arg-type]
+    r.close()
+    r.set_look("crt")  # harmless after close
+
+
+def test_qt_renderer_gpu_argument():
+    with pytest.raises(ValueError):
+        render.QtRenderer(size=(320, 200), gpu="yes")
+    r = render.QtRenderer(size=(320, 200), gpu="auto")
+    assert r.gpu_active is False  # the GLSL path is not implemented: CPU looks
+    r.close()
+
+
+def test_looks_png_over_fixture_video_frame(sample_video_path):
+    import cv2
+
+    cap = cv2.VideoCapture(str(sample_video_path))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 60)
+    ok, frame = cap.read()
+    cap.release()
+    assert ok and frame.shape == (540, 960, 3)
+    backdrop = Backdrop(frame, (2.0, 0, 0, 0, 2.0, 0, 0, 0, 1.0))  # 960x540 -> 1920x1080
+    lm, veh, per = CLASS_COLORS["landmark"], CLASS_COLORS["vehicle"], CLASS_COLORS["person"]
+    items = [
+        backdrop,
+        Brackets(560, 380, 260, 170, veh),
+        Tag(690, 370, "car · ~15 m", veh),
+        Brackets(1100, 300, 90, 230, per, highlighted=True),
+        Tag(1145, 290, "person · ~8 m", per, highlighted=True),
+        LandmarkLabel(1300, 200, 480, "Golden Gate Bridge", lm),
+        InfoCard(300, 600, "Fort Point", ("1.8 km · NNW", "Brick fort under the bridge"), lm),
+        Crosshair(960, 540, 40),
+        PointerRing(1250, 520, solid=True),
+        StatusCorner((("phone ✓", STATUS_OK), ("GPS ±8 m", STATUS_OK))),
+    ]
+    out = OUT / "looks"
+    out.mkdir(parents=True, exist_ok=True)
+    variants = [(lk, lk, None) for lk in LOOKS]
+    variants += [
+        ("flir_ironbow", "flir", {"palette": 1.0}),
+        ("flir_blackhot", "flir", {"mode": 1.0}),
+    ]
+    normal = arr(render.render_to_image(items, SIZE))
+    for name, look, params in variants:
+        img = render.render_to_image(items, SIZE, look=look, t_s=1.0, params=params)
+        assert (img.width(), img.height()) == SIZE
+        assert img.save(str(out / f"{name}.png"), "PNG")
+        if look != "normal":
+            assert np.abs(arr(img).astype(int) - normal.astype(int)).mean() > 4, name
+    for name, _, _ in variants:
+        assert (out / f"{name}.png").stat().st_size > 1000
