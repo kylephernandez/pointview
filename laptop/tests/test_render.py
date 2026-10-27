@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import numpy as np
@@ -518,3 +519,70 @@ def test_looks_png_over_fixture_video_frame(sample_video_path):
             assert np.abs(arr(img).astype(int) - normal.astype(int)).mean() > 4, name
     for name, _, _ in variants:
         assert (out / f"{name}.png").stat().st_size > 1000
+
+
+# ------------------------------------------------------------------- v2.1: world mesh and markers
+
+
+def _bgr(img: QImage) -> np.ndarray:
+    img = img.convertToFormat(QImage.Format.Format_RGB888)
+    a = np.frombuffer(img.constBits(), np.uint8).reshape(img.height(), img.bytesPerLine())
+    return a[:, : img.width() * 3].reshape(img.height(), img.width(), 3)[:, :, ::-1].copy()
+
+
+def test_wire_mesh_draws_segments_with_alpha_and_is_fast():
+    from pointview.interfaces import WireMesh
+
+    seg = np.array([[100, 100, 500, 100], [100, 300, 500, 300]], np.float32)
+    img = _bgr(
+        render.render_to_image([WireMesh(seg, (0, 255, 0), np.array([1.0, 0.2], np.float32))])
+    )
+    bright, dim = img[100, 300, 1], img[300, 300, 1]
+    assert bright > 150 and 10 < dim < bright * 0.5
+    assert img[200, 300].max() == 0  # nothing between the lines
+    # A realistic sparse mesh: 8k short edges (the scene caps the visible mesh at 8k).
+    rng = np.random.default_rng(0)
+    start = rng.uniform((0, 0), (1920, 1080), (8_000, 2))
+    many = np.hstack([start, start + rng.normal(0, 25, (8_000, 2))]).astype(np.float32)
+    item = WireMesh(many, (0, 255, 0), rng.uniform(0, 1, 8_000).astype(np.float32))
+    render.render_to_image([item])
+    t0 = time.perf_counter()
+    render.render_to_image([item])
+    ms = (time.perf_counter() - t0) * 1000
+    print(f"wire mesh 8k segments at 1080p: {ms:.1f} ms (incl. offscreen image conversion)")
+    assert ms < 40
+
+
+def test_marker_point_vs_square_and_label():
+    from pointview.interfaces import Marker
+
+    img = _bgr(
+        render.render_to_image(
+            [
+                Marker(400, 400, "point", (255, 255, 255), size=20),
+                Marker(800, 400, "square", (255, 255, 255), size=40, label="UAL1 · 14 km"),
+            ]
+        )
+    )
+    assert img[400, 400].min() > 200  # a point is filled
+    assert img[400, 800].max() == 0  # a square is hollow
+    assert img[380, 800].min() > 150  # its top edge is drawn
+    assert img[380:420, 830:1100].max() > 150  # label to the right
+
+
+def test_mesh_and_markers_in_every_look_png():
+    from pointview.interfaces import LOOKS, Marker, WireMesh
+
+    rng = np.random.default_rng(1)
+    x = rng.uniform(0, 1920, (400, 2))
+    y = rng.uniform(500, 1080, (400, 2))
+    seg = np.stack([x[:, 0], y[:, 0], x[:, 1], y[:, 1]], 1).astype(np.float32)
+    items = [
+        WireMesh(seg, (0, 220, 255), None),
+        Marker(700, 300, "square", (255, 255, 255), label="UAL123 · 14 km", highlighted=True),
+        Marker(1200, 260, "point", (190, 160, 255), label="ISS"),
+    ]
+    out = OUT / "looks"
+    out.mkdir(parents=True, exist_ok=True)
+    for look in LOOKS:
+        render.render_to_image(items, look=look).save(str(out / f"mesh_markers_{look}.png"))

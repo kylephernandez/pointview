@@ -54,10 +54,12 @@ from pointview.interfaces import (
     InfoCard,
     LandmarkLabel,
     Look,
+    Marker,
     PointerRing,
     StatusCorner,
     Tag,
     Text,
+    WireMesh,
 )
 
 log = logging.getLogger(__name__)
@@ -155,6 +157,68 @@ def _brackets(p: QPainter, it: Brackets) -> None:
     x0, y0, x1, y1 = it.x, it.y, it.x + it.w, it.y + it.h
     for cx, cy, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)):
         p.drawPolyline([QPointF(cx + dx * n, cy), QPointF(cx, cy), QPointF(cx, cy + dy * n)])
+
+
+MESH_ALPHA_BUCKETS = 8
+MESH_RASTER_MAX_W = 960
+
+
+def _wire_mesh(p: QPainter, it: WireMesh, size: tuple[int, int]) -> None:
+    """Rasterize the segments with OpenCV into one 8-bit coverage mask (antialiased; each segment
+    drawn at its alpha), colour it in one numpy pass and composite it once. Far faster than one
+    QPainter call per segment. Keep N ≲ 8k (the scene caps it): OpenCV costs ~0.5 µs per line."""
+    seg = np.asarray(it.segments, np.float32).reshape(-1, 4)
+    if len(seg) == 0:
+        return
+    dev = p.device()
+    dw, dh = (dev.width(), dev.height()) if dev is not None else size
+    # Rasterize at most ~960 px wide and let Qt scale it up smoothly: a quarter of the pixels at
+    # 1080p, and a faint thin wireframe looks the same.
+    scale = min(1.0, MESH_RASTER_MAX_W / dw)
+    w, h = max(1, round(dw * scale)), max(1, round(dh * scale))
+    sx, sy = w / size[0], h / size[1]
+    pts = np.round(seg.reshape(-1, 2, 2) * (sx, sy)).astype(np.int32)
+    alpha = (
+        np.ones(len(seg), np.float32)
+        if it.alpha is None
+        else np.clip(np.asarray(it.alpha, np.float32), 0.0, 1.0)
+    )
+    buckets = np.minimum((alpha * MESH_ALPHA_BUCKETS).astype(np.int32), MESH_ALPHA_BUCKETS - 1)
+    order = np.argsort(buckets, kind="stable")  # brighter buckets drawn last, on top
+    mask = np.zeros((h, w), np.uint8)
+    thickness = max(1, round(it.width_px * sx))
+    for b in np.unique(buckets):
+        sel = order[buckets[order] == b]
+        level = int(255 * (b + 1) / MESH_ALPHA_BUCKETS)
+        cv2.polylines(mask, list(pts[sel]), False, level, thickness, cv2.LINE_AA)
+    c = qcolor(it.color)
+    layer = np.empty((h, w, 4), np.uint8)
+    layer[..., 0], layer[..., 1], layer[..., 2] = c.blue(), c.green(), c.red()
+    layer[..., 3] = mask  # QImage ARGB32 is BGRA in memory, straight alpha
+    img = QImage(layer.data, w, h, 4 * w, QImage.Format.Format_ARGB32)
+    p.save()
+    p.resetTransform()
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    p.drawImage(QRectF(0, 0, dw, dh), img)
+    p.restore()
+
+
+def _marker(p: QPainter, it: Marker) -> None:
+    color = qcolor(it.color, mix_white=0.35 if it.highlighted else 0.0)
+    r = it.size / 2
+    if it.shape == "point":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(it.x, it.y), r, r)
+    else:
+        p.setPen(_pen(color, 3.0 if it.highlighted else 2.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(QRectF(it.x - r, it.y - r, it.size, it.size))
+    if it.label:
+        p.setFont(make_font(MIN_TEXT_PX, bold=it.highlighted))
+        p.setPen(color)
+        fm = p.fontMetrics()
+        _draw_text_baseline(p, it.x + r + 8, it.y + (fm.ascent() - fm.descent()) / 2, it.label)
 
 
 def _tag(p: QPainter, it: Tag) -> None:
@@ -308,6 +372,10 @@ def paint_items(p: QPainter, items: Sequence[DrawItem], size: tuple[int, int]) -
                 _status_corner(p, it)
             case Text():
                 _text(p, it)
+            case WireMesh():
+                _wire_mesh(p, it, size)
+            case Marker():
+                _marker(p, it)
             case Backdrop():
                 pass  # drawn by the compositor before the overlay
             case _:
