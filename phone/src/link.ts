@@ -12,7 +12,14 @@ import {
   type SocketFactory,
   type WebSocketLike,
 } from './discovery';
-import { LOOKS, type HapticStyle, type LaptopMessage, type Look } from './protocol';
+import {
+  LOOKS,
+  MARKER_SHAPES,
+  type HapticStyle,
+  type LaptopMessage,
+  type Look,
+  type MarkerShape,
+} from './protocol';
 
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
@@ -75,6 +82,8 @@ export function parseLaptopMessage(data: unknown): LaptopMessage | null {
     if (typeof m.message === 'string') out.message = m.message;
     if (typeof m.look === 'string' && (LOOKS as readonly string[]).includes(m.look))
       out.look = m.look as Look;
+    if (typeof m.marker === 'string' && (MARKER_SHAPES as readonly string[]).includes(m.marker))
+      out.marker = m.marker as MarkerShape;
     if (typeof m.passthrough === 'boolean') out.passthrough = m.passthrough;
     return out;
   }
