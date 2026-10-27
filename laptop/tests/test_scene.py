@@ -152,3 +152,22 @@ def test_crowded_tags_declutter_nearest_first_and_stay_on_screen():
     for t in tags:
         half = len(t.text) * 15 / 2
         assert t.x - half >= 0 and t.x + half <= DISPLAY[0]
+
+
+def test_live_entity_marker_and_card():
+    plane = Entity(
+        "ac:abc123",
+        "aircraft",
+        "UAL123",
+        0.0,
+        5.0,
+        0.0,
+        distance_m=12_400,
+        meta={"route": "SFO → LAX", "type": "A320", "altitude_ft": "11000", "squawk": "1200"},
+    )
+    items = scene([plane])
+    (b,) = of(items, Brackets)
+    assert b.w == 36 and of(items, Tag)[0].text == "UAL123 · ~12.4 km"
+    card = info_for(plane)
+    assert card.title == "UAL123"
+    assert card.lines == ("~12.4 km", "SFO → LAX", "A320", "alt ft 11000")

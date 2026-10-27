@@ -11,7 +11,7 @@ import pytest
 from test_fake_phone import fp
 from websockets.asyncio.client import connect
 
-from pointview.interfaces import PhoneLinkAPI
+from pointview.interfaces import LAYER_KINDS, PhoneLinkAPI
 from pointview.phone_link import PhoneLink, PhoneLinkThread
 
 
@@ -206,16 +206,34 @@ async def test_layers_persist_when_omitted(link, url):
     async with connect(url) as ws:
         await send_all(ws, sample(1.79e12))
         await until(lambda: link.latest() is not None)
-        assert link.latest().layers == {"people": True, "vehicles": True, "landmarks": True}
+        assert link.latest().layers == layers()
         await send_all(ws, sample(1.79e12 + 16, layers={"people": False}))
         await until(lambda: link.stats().messages == 2)
-        assert link.latest().layers == {"people": False, "vehicles": True, "landmarks": True}
+        assert link.latest().layers == layers(people=False)
         await send_all(ws, sample(1.79e12 + 32), sample(1.79e12 + 48, layers={"landmarks": False}))
         await until(lambda: link.stats().messages == 4)
-        assert link.history(10)[-2].layers == {"people": False, "vehicles": True, "landmarks": True}
-        assert link.latest().layers == {"people": False, "vehicles": True, "landmarks": False}
+        assert link.history(10)[-2].layers == layers(people=False)
+        assert link.latest().layers == layers(people=False, landmarks=False)
         # History entries do not alias one dict.
         assert link.history(10)[0].layers["people"] is True
+
+
+def layers(**off: bool) -> dict:
+    return {**dict.fromkeys(LAYER_KINDS, True), **off}
+
+
+async def test_look_and_passthrough_persist_when_omitted(link, url):
+    async with connect(url) as ws:
+        await send_all(ws, sample(1.79e12))
+        await until(lambda: link.latest() is not None)
+        assert link.latest().look == "normal" and link.latest().passthrough is False
+        await send_all(ws, {**sample(1.79e12 + 16), "look": "nvg", "passthrough": True})
+        await until(lambda: link.stats().messages == 2)
+        await send_all(ws, sample(1.79e12 + 32, layers={"aircraft": False}))
+        await until(lambda: link.stats().messages == 3)
+        st = link.latest()
+        assert st.look == "nvg" and st.passthrough is True
+        assert st.layers == layers(aircraft=False)
 
 
 async def test_second_connection_replaces_first(link, url):

@@ -7,15 +7,18 @@ own, so tests can drive it directly.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from pointview import landmarks, world
-from pointview.entities import Entity, EntityKind
+from pointview.entities import LIVE_KINDS, Entity
 from pointview.interfaces import (
     IDENTITY_QUAT,
+    LAYER_KINDS,
     Alignment,
+    Backdrop,
     ButtonEvent,
     Calibration,
     Clock,
@@ -24,20 +27,19 @@ from pointview.interfaces import (
     InfoCard,
     Layer,
     LayerContext,
+    Look,
     PhoneState,
     Renderer,
+    TrackingCameraSource,
+    View,
     now,
 )
 from pointview.scene import InfoContent, SceneInput, Status, build_scene, info_for
 
 log = logging.getLogger(__name__)
 
-#: Phone layer toggle name → entity kind.
-LAYER_KINDS: dict[str, EntityKind] = {
-    "people": "person",
-    "vehicles": "vehicle",
-    "landmarks": "landmark",
-}
+#: Live entities this far outside the display still count as "in view" (labels don't pop).
+VIEW_MARGIN_DEG = 5.0
 STATUS_PERIOD_S = 0.5
 #: Hide the pointer when the newest phone sample is older than this.
 POINTER_TIMEOUT_S = 1.0
@@ -80,7 +82,10 @@ class PointViewApp:
         calibration: Calibration | None = None,
         landmark_layer: landmarks.LandmarkLayer | None = None,
         clock: Clock = now,
+        wall_clock: Clock = time.time,
         render_latency_s: float = 0.0,
+        look: Look = "normal",
+        passthrough: bool = False,
     ) -> None:
         self.glasses = glasses
         self.layers = list(layers)
@@ -89,7 +94,12 @@ class PointViewApp:
         self.calibration = calibration or Calibration()
         self.landmark_layer = landmark_layer
         self.clock = clock
+        self.wall_clock = wall_clock
         self.render_latency_s = render_latency_s
+        #: Used until the phone reports its own choice.
+        self.default_look: Look = look
+        self.default_passthrough = passthrough
+        self.look: Look | None = None
         self.alignment = Alignment()
         self.snapped_id: str | None = None
         self.info_id: str | None = None
@@ -177,6 +187,39 @@ class PointViewApp:
             return info_for(e)
         return info_for(e, landmarks.summary_lines(summary, 40), landmarks.WIKIPEDIA_ATTRIBUTION)
 
+    def _in_view(self, e: Entity, view: View | None) -> bool:
+        if view is None:
+            return False
+        return world.in_view(
+            e.world_yaw_deg,
+            e.world_pitch_deg,
+            view.head_quat,
+            view.north_offset_deg,
+            view.display_fov_deg,
+            VIEW_MARGIN_DEG,
+        )
+
+    def _backdrop(self, look: Look, head_quat_now) -> Backdrop | None:
+        """Passthrough from a VITURE camera, warped to line up with the world (contracts §8).
+        NVG prefers the grayscale tracking cameras; everything else uses the front camera."""
+        g = self.glasses
+        frame, intr, cam_q = None, None, self.calibration.camera_to_head_quat
+        if look == "nvg" and isinstance(g, TrackingCameraSource):
+            frame = g.latest_tracking_frame()
+            if frame is not None:
+                intr, cam_q = g.tracking_camera_intrinsics, g.tracking_camera_to_head_quat
+        if frame is None:
+            frame, intr = g.latest_frame(), g.camera_intrinsics
+        if frame is None or intr is None:
+            return None
+        pose_then = g.pose_at(frame.t)
+        if pose_then is None:
+            return None
+        h = world.backdrop_homography(
+            intr, cam_q, pose_then.quat, head_quat_now, g.display_size, g.display_fov_deg
+        )
+        return Backdrop(frame.bgr, h)
+
     def tick(self) -> list[DrawItem]:
         t = self.clock()
         pose = self.glasses.pose_at(t + self.render_latency_s)
@@ -189,21 +232,43 @@ class PointViewApp:
             enabled = frozenset(
                 k for name, k in LAYER_KINDS.items() if phone.layers.get(name, True)
             )
-        ctx = LayerContext(t, self.glasses, self.alignment, self.calibration, phone, enabled)
+        fresh = phone is not None and connected and t - phone.received_at < POINTER_TIMEOUT_S
+        pointer = None
+        if fresh and self.alignment.aligned_at is not None:
+            pointer = self._pointer_world(phone, t)
+        view = None
+        if pose is not None:
+            fwd = world.quat_rotate(head_quat, (0.0, 1.0, 0.0))
+            yaw, pitch = world.yaw_pitch_from_vector(fwd)
+            north = self.alignment.north_offset_deg
+            view = View(
+                head_quat, north, self.glasses.display_fov_deg, world.wrap_deg(yaw + north), pitch
+            )
+        ctx = LayerContext(
+            t,
+            self.glasses,
+            self.alignment,
+            self.calibration,
+            phone,
+            enabled,
+            unix_time=self.wall_clock(),
+            view=view,
+            pointer=pointer,
+            focus_id=self.snapped_id,
+        )
         entities: list[Entity] = []
         for layer in self.layers:
             try:
                 entities.extend(layer.update(ctx))
             except Exception:
                 log.exception("layer %s failed", getattr(layer, "name", layer))
+        # Live data only for what the glasses are looking at (contracts §7).
+        entities = [e for e in entities if e.kind not in LIVE_KINDS or self._in_view(e, view)]
         self.entities = entities
 
         self._handle_buttons(phone, t)
 
-        pointer = None
-        fresh = phone is not None and connected and t - phone.received_at < POINTER_TIMEOUT_S
-        if fresh and self.alignment.aligned_at is not None:
-            pointer = self._pointer_world(phone, t)
+        if pointer is not None:
             new = world.choose_snap(pointer[0], pointer[1], entities, self.snapped_id)
             if new is not None and new != self.snapped_id:
                 self.stats.snaps += 1
@@ -236,7 +301,16 @@ class PointViewApp:
                 attribution=landmarks.OSM_ATTRIBUTION,
             )
         )
+        look = phone.look if phone is not None else self.default_look
+        passthrough = phone.passthrough if phone is not None else self.default_passthrough
+        if passthrough and pose is not None:
+            backdrop = self._backdrop(look, head_quat)
+            if backdrop is not None:
+                self.items.insert(0, backdrop)
         if self.renderer is not None:
+            if look != self.look and hasattr(self.renderer, "set_look"):
+                self.renderer.set_look(look)
+            self.look = look
             self.renderer.show(self.items)
 
         if connected and t - self._last_status_t >= STATUS_PERIOD_S:

@@ -9,7 +9,14 @@ import pytest
 from pointview import world
 from pointview.app import PointViewApp
 from pointview.entities import Entity
-from pointview.interfaces import ButtonEvent, CameraIntrinsics, Crosshair, InfoCard, PhoneState
+from pointview.interfaces import (
+    LAYER_KINDS,
+    ButtonEvent,
+    CameraIntrinsics,
+    Crosshair,
+    InfoCard,
+    PhoneState,
+)
 from pointview.interfaces import Pose as _Pose
 
 
@@ -194,7 +201,8 @@ def test_layer_toggles_reach_layers_and_status_is_sent(rig):
     app, phone, layer, _ = rig
     phone.point(0.0, heading=0.0, vehicles=False)
     app.tick()
-    assert layer.last_ctx.enabled == frozenset({"person", "landmark"})
+    assert layer.last_ctx.enabled == frozenset(LAYER_KINDS.values()) - {"vehicle"}
+    assert layer.last_ctx.unix_time > 1.7e9 and layer.last_ctx.view is not None
     assert [e.id for e in app.entities] == [TOWER.id]
     status = [m for m in phone.sent if m["type"] == "status"]
     assert status and status[0]["aligned"] is False

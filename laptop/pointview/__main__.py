@@ -19,7 +19,7 @@ from pathlib import Path
 
 from pointview.app import PointViewApp, RunStats
 from pointview.calibration import load_intrinsics, parse_camera_offset
-from pointview.interfaces import InfoCard, Layer
+from pointview.interfaces import LOOKS, InfoCard, Layer
 
 log = logging.getLogger("pointview")
 
@@ -65,6 +65,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--screenshot-dir", type=Path, help="save PNGs of what is drawn")
     p.add_argument(
         "--screenshot-every", type=float, default=2.0, help="seconds between screenshots"
+    )
+    p.add_argument(
+        "--look",
+        choices=LOOKS,
+        default="normal",
+        help="God's Eye View look until the phone picks one",
+    )
+    p.add_argument(
+        "--passthrough", action="store_true", help="show the VITURE camera behind the overlay"
     )
     p.add_argument("--stats-json", type=Path, help="write the run counters here on exit")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -128,6 +137,8 @@ def run(args: argparse.Namespace) -> RunStats:
         renderer,
         calibration=parse_camera_offset(args.camera_offset),
         landmark_layer=landmark_layer,
+        look=args.look,
+        passthrough=args.passthrough,
     )
 
     glasses.start()

@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from pointview import world
-from pointview.entities import Entity
+from pointview.entities import LIVE_KINDS, Entity
 from pointview.interfaces import (
     CLASS_COLORS,
     POINTER_COLOR,
@@ -103,6 +103,24 @@ def entity_tag_text(e: Entity) -> str:
     return f"{e.label} · {dist}" if dist else e.label
 
 
+#: Live-layer meta keys shown on the info card, in order (first three present are shown).
+LIVE_META_LABELS: dict[str, str] = {
+    "emergency": "EMERGENCY ",
+    "route": "",
+    "next_pass": "",
+    "type": "",
+    "altitude_ft": "alt ft ",
+    "altitude_km": "alt km ",
+    "speed_kt": "kt ",
+    "visible": "visible: ",
+    "place": "",
+    "mag": "M",
+    "destination": "to ",
+}
+#: Marker size (px) for live entities, which have no angular size.
+LIVE_MARKER_PX = 36.0
+
+
 def info_for(
     e: Entity, summary_lines: Sequence[str] = (), footer: str | None = None
 ) -> InfoContent:
@@ -113,6 +131,11 @@ def info_for(
         return InfoContent(e.id, "person", (dist,) if dist else ())
     if e.kind == "vehicle":
         return InfoContent(e.id, e.label, (dist,) if dist else ())
+    if e.kind in LIVE_KINDS:
+        details = tuple(
+            f"{LIVE_META_LABELS[k]}{e.meta[k]}" for k in LIVE_META_LABELS if e.meta.get(k)
+        )
+        return InfoContent(e.id, e.label, ((dist,) if dist else ()) + details[:3], footer)
     lines = ((dist,) if dist else ()) + tuple(summary_lines[:2])
     return InfoContent(e.id, e.label, lines, footer)
 
@@ -190,8 +213,17 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         if not (p.in_front and p.on_screen):
             continue
         size = e.size_deg
-        bw = world.angular_size_to_px(size.w, inp.display_size, inp.display_fov_deg) if size else 60
-        bh = world.angular_size_to_px(size.h, inp.display_size, inp.display_fov_deg) if size else 60
+        default_px = LIVE_MARKER_PX if e.kind in LIVE_KINDS else 60
+        bw = (
+            world.angular_size_to_px(size.w, inp.display_size, inp.display_fov_deg)
+            if size
+            else default_px
+        )
+        bh = (
+            world.angular_size_to_px(size.h, inp.display_size, inp.display_fov_deg)
+            if size
+            else default_px
+        )
         bw, bh = max(bw, 24.0), max(bh, 24.0)
         items.append(Brackets(p.x - bw / 2, p.y - bh / 2, bw, bh, color, hl))
         tags.append((hl, e.distance_m or 1e9, p.x, p.y - bh / 2 - 8, e))
