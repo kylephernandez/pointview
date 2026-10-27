@@ -3,6 +3,7 @@ import {
   LAYER_NAMES,
   PROTOCOL_VERSION,
   type Look,
+  type MarkerShape,
   type ButtonName,
   type LayerName,
   type Layers,
@@ -26,6 +27,7 @@ export class MessageBuilder {
   private buttons: ButtonName[] = [];
   private layers: FullLayers = Object.fromEntries(LAYER_NAMES.map((n) => [n, true])) as FullLayers;
   private look: Look = 'normal';
+  private marker: MarkerShape = 'square';
   private passthrough = false;
   // Layers, look and passthrough travel together: first message, on change, and every resendMs.
   private layersDirty = true;
@@ -58,6 +60,17 @@ export class MessageBuilder {
       this.look = look;
       this.layersDirty = true;
     }
+  }
+
+  setMarker(marker: MarkerShape): void {
+    if (this.marker !== marker) {
+      this.marker = marker;
+      this.layersDirty = true;
+    }
+  }
+
+  getMarker(): MarkerShape {
+    return this.marker;
   }
 
   getLook(): Look {
@@ -121,6 +134,7 @@ export class MessageBuilder {
     if (this.layersDirty || sample.t_ms - this.lastLayersSentAt >= this.resendMs) {
       msg.layers = { ...this.layers } as Layers;
       msg.look = this.look;
+      msg.marker = this.marker;
       msg.passthrough = this.passthrough;
       this.layersDirty = false;
       this.lastLayersSentAt = sample.t_ms;

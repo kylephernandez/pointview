@@ -7,7 +7,7 @@ import { AlignPressDetector, realTimers } from './src/buttons';
 import { playHaptic } from './src/haptics';
 import { PhoneLink, type LinkState } from './src/link';
 import { MessageBuilder } from './src/message';
-import { LOOKS, type LayerName, type LaptopMessage, type Look } from './src/protocol';
+import { LOOKS, type LayerName, type LaptopMessage, type Look, type MarkerShape } from './src/protocol';
 import { defaultSettings, loadSettings, nextLook, saveSettings, statusMismatch } from './src/settings';
 import { startLocation, startMotion } from './src/sensors';
 import { asyncStore } from './src/storage';
@@ -52,6 +52,7 @@ export default function App() {
   const [layers, setLayers] = useState(builder.getLayers());
   const [look, setLook] = useState<Look>('normal');
   const [passthrough, setPassthrough] = useState(false);
+  const [marker, setMarker] = useState<MarkerShape>('square');
   const [rate, setRate] = useState(0);
   const [gpsAcc, setGpsAcc] = useState<number | null>(null);
   const [headingAcc, setHeadingAcc] = useState<number | null>(null);
@@ -87,9 +88,11 @@ export default function App() {
       for (const [n, on] of Object.entries(s.layers)) builder.setLayer(n as LayerName, on);
       builder.setLook(s.look);
       builder.setPassthrough(s.passthrough);
+      builder.setMarker(s.marker);
       setLayers(builder.getLayers());
       setLook(s.look);
       setPassthrough(s.passthrough);
+      setMarker(s.marker);
       ready.current = true;
     });
     void phoneLink.start().then(() => setManualText(phoneLink.getManualAddress() ?? ''));
@@ -125,6 +128,7 @@ export default function App() {
       ...defaultSettings(),
       look: builder.getLook(),
       passthrough: builder.getPassthrough(),
+      marker: builder.getMarker(),
       layers: builder.getLayers(),
     });
 
@@ -137,6 +141,12 @@ export default function App() {
   const chooseLook = (l: Look) => {
     builder.setLook(l);
     setLook(l);
+    persist();
+  };
+
+  const chooseMarker = (m: MarkerShape) => {
+    builder.setMarker(m);
+    setMarker(m);
     persist();
   };
 
@@ -157,7 +167,7 @@ export default function App() {
     }
   };
 
-  const mismatch = statusMismatch(laptop, look, passthrough);
+  const mismatch = statusMismatch(laptop, look, passthrough, marker);
 
   const submitManual = async () => {
     const ok = await phoneLink.setManualAddress(manualText);
@@ -194,8 +204,8 @@ export default function App() {
             {laptop?.message ? `   ${laptop.message}` : ''}
           </Text>
           <Text style={styles.stat}>
-            {laptop?.look !== undefined || laptop?.passthrough !== undefined
-              ? `Glasses: ${(laptop.look ?? look).toUpperCase()}   passthrough ${(laptop.passthrough ?? passthrough) ? 'on' : 'off'}`
+            {laptop?.look !== undefined || laptop?.passthrough !== undefined || laptop?.marker !== undefined
+              ? `Glasses: ${(laptop.look ?? look).toUpperCase()}   passthrough ${(laptop.passthrough ?? passthrough) ? 'on' : 'off'}   ${(laptop.marker ?? marker).toUpperCase()}`
               : 'Glasses: look not reported'}
           </Text>
           {mismatch && <Text style={styles.mismatch}>{`${mismatch} (resending)`}</Text>}
@@ -252,6 +262,26 @@ export default function App() {
           <Switch value={passthrough} onValueChange={choosePassthrough} />
         </View>
         <Text style={styles.hint}>Looks only show over passthrough.</Text>
+        <View style={styles.ptRow}>
+          <Text style={styles.toggleText}>World mesh (wireframe of the surroundings)</Text>
+          <Switch value={layers.mesh} onValueChange={(v) => toggle('mesh', v)} />
+        </View>
+        <View style={styles.ptRow}>
+          <Text style={styles.toggleText}>Tracked objects as</Text>
+          <View style={styles.markers}>
+            {(['square', 'point'] as const).map((m) => (
+              <Pressable
+                key={m}
+                style={[styles.markerBtn, marker === m && styles.lookBtnOn]}
+                onPress={() => chooseMarker(m)}
+                accessibilityLabel={`Marker ${m}`}
+                accessibilityState={{ selected: marker === m }}
+              >
+                <Text style={[styles.lookText, marker === m && styles.lookTextOn]}>{m.toUpperCase()}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
 
         {LAYER_GROUPS.map((g) => (
           <View key={g.title}>
@@ -328,6 +358,8 @@ const styles = StyleSheet.create({
   lookBtnOn: { backgroundColor: '#f59e0b' },
   lookText: { color: '#d1d5db', fontSize: 18, fontWeight: '800' },
   lookTextOn: { color: '#000' },
+  markers: { flexDirection: 'row', gap: 8 },
+  markerBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#1f2937' },
   ptRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
