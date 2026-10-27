@@ -475,7 +475,14 @@ WGS84_F = 1 / 298.257223563
 
 def ecef_from_geodetic(lat: float, lon: float, alt_m: float = 0.0) -> Vec3:
     """WGS84 latitude/longitude (degrees) and ellipsoidal height (m) → ECEF meters."""
-    raise NotImplementedError
+    e2 = WGS84_F * (2.0 - WGS84_F)
+    sl, cl = math.sin(lat * _RAD), math.cos(lat * _RAD)
+    n = WGS84_A / math.sqrt(1.0 - e2 * sl * sl)
+    return (
+        (n + alt_m) * cl * math.cos(lon * _RAD),
+        (n + alt_m) * cl * math.sin(lon * _RAD),
+        (n * (1.0 - e2) + alt_m) * sl,
+    )
 
 
 def look_angles(
@@ -491,8 +498,23 @@ def look_angles(
     Returns (world_yaw_deg clockwise from true north [0, 360), pitch_deg above the local horizon,
     slant_range_m). A plane 10 km up and 50 km away comes out about 10° up; a ship 30 km away comes
     out slightly below 0°.
+
+    The local horizon is the plane perpendicular to the ellipsoid normal at the observer (ENU "up").
+    Coincident points return (0, 0, 0).
     """
-    raise NotImplementedError
+    ox, oy, oz = ecef_from_geodetic(obs_lat, obs_lon, obs_alt_m)
+    tx, ty, tz = ecef_from_geodetic(lat, lon, alt_m)
+    dx, dy, dz = tx - ox, ty - oy, tz - oz
+    sp, cp = math.sin(obs_lat * _RAD), math.cos(obs_lat * _RAD)
+    sl, cl = math.sin(obs_lon * _RAD), math.cos(obs_lon * _RAD)
+    east = -sl * dx + cl * dy
+    north = -sp * cl * dx - sp * sl * dy + cp * dz
+    up = cp * cl * dx + cp * sl * dy + sp * dz
+    rng = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if rng < _EPS:
+        return 0.0, 0.0, 0.0
+    yaw, pitch = yaw_pitch_from_vector((east, north, up))
+    return yaw, pitch, rng
 
 
 def in_view(
@@ -504,8 +526,31 @@ def in_view(
     margin_deg: float = 0.0,
 ) -> bool:
     """True when the direction is in front of the viewer and within the display's FOV, widened by
-    margin_deg on every side (use a few degrees so labels don't pop at the edges)."""
-    raise NotImplementedError
+    margin_deg on every side (use a few degrees so labels don't pop at the edges).
+
+    The test is on the tangent-plane angles of head_angles_deg, which are what
+    project_to_display uses: |alpha'| <= FOV_h/2 + margin and |beta'| <= FOV_v/2 + margin. With
+    margin 0 this equals project_to_display(...).on_screen (for the matching display aspect).
+    """
+    alpha, beta, front = head_angles_deg(
+        world_yaw_deg, world_pitch_deg, head_quat, north_offset_deg
+    )
+    if not front:
+        return False
+    return (
+        abs(alpha) <= display_fov_deg[0] / 2.0 + margin_deg
+        and abs(beta) <= display_fov_deg[1] / 2.0 + margin_deg
+    )
+
+
+def _mat_from_quat(q: Quat) -> list[list[float]]:
+    """3x3 rotation matrix (rows) of unit quaternion q, so that M v = quat_rotate(q, v)."""
+    cols = [quat_rotate(q, e) for e in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))]
+    return [[cols[c][r] for c in range(3)] for r in range(3)]
+
+
+def _mat_mul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
 
 
 def backdrop_homography(
@@ -519,11 +564,52 @@ def backdrop_homography(
     """Row-major 3x3 mapping camera pixels to display pixels so a passthrough image lines up with
     the world (rotation-only / far-scene model): H = K_display · R · K_camera⁻¹, where R takes
     camera-frame rays at capture time to the head frame now (late-latching the head rotation that
-    happened since the frame was captured). Ignores lens distortion (undistort the frame first)."""
-    raise NotImplementedError
+    happened since the frame was captured). Ignores lens distortion (undistort the frame first).
+
+    R = Rot(q_now)ᵀ · Rot(q_capture) · Rot(camera_to_head_quat) · P, with P the axis swap
+    (x, y, z) → (x, z, -y) of camera_to_head. The result is scaled so H[8] = 1 (when H[8] is not
+    degenerate).
+    """
+    p = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]
+    r = _mat_mul(_mat_from_quat(camera_to_head_quat), p)
+    r = _mat_mul(_mat_from_quat(head_quat_at_capture), r)
+    r = _mat_mul(_mat_from_quat(quat_conj(head_quat_now)), r)
+    w, h = display_size
+    f = display_focal_px(display_size, display_fov_deg)
+    # Display: x*h.y = f*h.x + W/2*h.y ; y*h.y = H/2*h.y - f*h.z ; w = h.y.
+    kd = [[f, w / 2.0, 0.0], [0.0, h / 2.0, -f], [0.0, 1.0, 0.0]]
+    kinv = [
+        [1.0 / intr.fx, 0.0, -intr.cx / intr.fx],
+        [0.0, 1.0 / intr.fy, -intr.cy / intr.fy],
+        [0.0, 0.0, 1.0],
+    ]
+    m = _mat_mul(_mat_mul(kd, r), kinv)
+    flat = [m[i][j] for i in range(3) for j in range(3)]
+    if abs(flat[8]) > _EPS:
+        flat = [x / flat[8] for x in flat]
+    return tuple(flat)
 
 
 def sun_direction(unix_time: float, lat: float, lon: float) -> tuple[float, float]:
     """(world_yaw_deg, pitch_deg) of the Sun for an observer (low-precision almanac, ~0.5°).
-    Used for "is it dark" and "is that satellite sunlit"."""
-    raise NotImplementedError
+    Used for "is it dark" and "is that satellite sunlit".
+
+    Astronomical Almanac low-precision formulae (valid 1950-2050, about 0.01° in the Sun's
+    ecliptic longitude). Pitch is the geometric elevation; atmospheric refraction (about 0.57° at
+    the horizon) is not applied.
+    """
+    n = unix_time / 86400.0 + 2440587.5 - 2451545.0  # days since J2000.0
+    mean_lon = 280.460 + 0.9856474 * n
+    g = (357.528 + 0.9856003 * n) * _RAD
+    lam = (mean_lon + 1.915 * math.sin(g) + 0.020 * math.sin(2.0 * g)) * _RAD
+    eps = (23.439 - 0.0000004 * n) * _RAD
+    ra = math.atan2(math.cos(eps) * math.sin(lam), math.cos(lam))
+    dec = math.asin(math.sin(eps) * math.sin(lam))
+    gmst = 280.46061837 + 360.98564736629 * n
+    ha = (gmst + lon) * _RAD - ra
+    phi = lat * _RAD
+    # Local frame: east, north, up components of the unit vector to the Sun.
+    east = -math.cos(dec) * math.sin(ha)
+    north = math.sin(dec) * math.cos(phi) - math.cos(dec) * math.cos(ha) * math.sin(phi)
+    up = math.sin(dec) * math.sin(phi) + math.cos(dec) * math.cos(ha) * math.cos(phi)
+    return yaw_pitch_from_vector((east, north, up))
