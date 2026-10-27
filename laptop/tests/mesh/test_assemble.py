@@ -153,3 +153,18 @@ def test_terrain_only_mesh():
     mesh = A.build_world_mesh(None, flat_terrain(), LAT, LON, 800)
     assert mesh.source == "terrarium" and "OpenStreetMap" not in mesh.attribution
     assert len(mesh.edges) > 0
+
+
+def test_world_enu_matches_reference():
+    """W15's world.enu_from_geodetic agrees with the mesh tests' independent WGS84 reference."""
+    import numpy as np
+
+    from pointview import world
+    from tests.mesh import _world_ref_mesh as ref
+
+    lat = np.array([37.80, 37.81, 37.79])
+    lon = np.array([-122.47, -122.46, -122.48])
+    alt = np.array([0.0, 30.0, -10.0])
+    a = world.enu_from_geodetic(37.806, -122.468, 3.7, lat, lon, alt)
+    b = ref.enu_from_geodetic(37.806, -122.468, 3.7, lat, lon, alt)
+    assert np.allclose(a, b, atol=1e-6)

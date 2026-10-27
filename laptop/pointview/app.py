@@ -111,6 +111,7 @@ class PointViewApp:
         self.default_look: Look = look
         self.default_passthrough = passthrough
         self.mesh_source = mesh_source
+        self._mesh_attribution = landmarks.OSM_ATTRIBUTION
         self.look: Look | None = None
         self.alignment = Alignment()
         self.snapped_id: str | None = None
@@ -242,6 +243,7 @@ class PointViewApp:
         mesh = self.mesh_source.mesh_near(phone.lat, phone.lon)
         if mesh is None:
             return None
+        self._mesh_attribution = mesh.attribution or landmarks.OSM_ATTRIBUTION
         ground = self.mesh_source.ground_alt_m(phone.lat, phone.lon)
         eye_alt = (ground if ground is not None else mesh.origin.alt_m) + world.EYE_HEIGHT_M
         seg, dist = world.project_mesh(
@@ -319,6 +321,7 @@ class PointViewApp:
         else:
             self.snapped_id = None
 
+        mesh_item = self._mesh(phone, head_quat) if pose is not None else None
         info = self._info_content()
         status = Status(
             phone_connected=connected,
@@ -341,8 +344,10 @@ class PointViewApp:
                 info=info,
                 show_crosshair=self.alignment.aligned_at is None,
                 marker_shape=phone.marker if phone is not None else "square",
-                mesh=self._mesh(phone, head_quat) if pose is not None else None,
-                attribution=landmarks.OSM_ATTRIBUTION,
+                mesh=mesh_item,
+                attribution=self._mesh_attribution
+                if mesh_item is not None
+                else landmarks.OSM_ATTRIBUTION,
             )
         )
         look = phone.look if phone is not None else self.default_look

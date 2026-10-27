@@ -50,8 +50,13 @@ def test_real_tiles_known_points(tile_pngs):
     h = m.elevation_at(LAT, LON)
     assert h is not None and 2.0 < h < 6.0
     assert h == pytest.approx(3.665, abs=0.05)
-    # San Francisco Bay: Terrarium carries bathymetry, so water is below 0.
-    assert m.elevation_at(37.8100, -122.4600) < -5
+    # San Francisco Bay: Terrarium carries bathymetry (water is below 0); by default the model
+    # clamps to the water surface, which is what you see through the glasses.
+    assert m.elevation_at(37.8100, -122.4600) == 0.0
+    raw = T.TerrainModel(
+        m._tiles and {(m.zoom, x, y): a for (x, y), a in m._tiles.items()}, m.zoom, floor_m=None
+    )
+    assert raw.elevation_at(37.8100, -122.4600) < -5
     # Presidio hills to the south: tens of meters up.
     assert 50 < m.elevation_at(37.7985, -122.4640) < 100
     # Outside the four tiles: unknown.

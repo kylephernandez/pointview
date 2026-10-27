@@ -250,6 +250,7 @@ async def run_fake_phone(
     clock_skew_ms: float = 0.0,
     seed: int | None = 0,
     on_message: Callable[[dict], None] | None = None,
+    settings: dict | None = None,
 ) -> FakePhoneStats:
     """Connect to ``url`` and send the scripted samples in real time.
 
@@ -258,6 +259,8 @@ async def run_fake_phone(
     ``jitter_ms`` delays each send by a random 0..jitter_ms (the sample time stays the true sample time).
     ``clock_skew_ms`` is added to ``t_ms`` to emulate a phone clock that disagrees with the laptop's.
     Laptop messages received are stored in ``stats.received`` and passed to ``on_message``.
+    ``settings`` (e.g. ``{"look": "nvg", "passthrough": True, "marker": "point"}``) is sent in the
+    first message and then every second, like the real app's settings.
     """
     rng = random.Random(seed)
     stats = FakePhoneStats()
@@ -318,6 +321,8 @@ async def run_fake_phone(
                     buttons=buttons,
                     layers=layers or None,
                 )
+                if settings and (i == 0 or int(t) != int(last_t)):
+                    msg.update(settings)
                 if jitter_ms > 0:
                     await asyncio.sleep(rng.uniform(0.0, jitter_ms) / 1000.0)
                 await ws.send(json.dumps(msg))

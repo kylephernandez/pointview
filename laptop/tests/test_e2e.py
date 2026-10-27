@@ -72,3 +72,28 @@ def test_mock_detection_pipeline(tmp_path, fixtures_dir):
         tmp_path, OUT / "e2e_detection", "--video", str(video), "--no-landmarks", duration=8
     )
     assert {"person", "vehicle"} <= set(stats["kinds_seen"]), stats
+
+
+def test_mock_world_mesh_live_data_and_look(tmp_path):
+    """The God's Eye View stack in --mock: sparse world mesh from OSM buildings + terrain, live
+    aircraft/satellites/quakes as markers (only where the glasses look), the phone snapping onto
+    a real recorded aircraft, and an NVG look over the passthrough camera."""
+    shots = OUT / "e2e_gev"
+    for old in shots.glob("*.png"):
+        old.unlink()
+    stats = run_mock(
+        tmp_path,
+        shots,
+        "--mock-tour",
+        "aircraft",
+        "--look",
+        "nvg",
+        "--passthrough",
+        "--no-detection",
+        duration=10.0,
+    )
+    assert stats["frames"] > 200, stats  # looks + passthrough cost more than the plain overlay
+    assert stats["mesh_segments_max"] > 100
+    assert "aircraft" in stats["kinds_seen"]
+    assert stats["snaps"] >= 1 and stats["info_frames"] > 0
+    assert (shots / "info_card.png").exists()

@@ -152,6 +152,9 @@ class _FixtureFeeds:
         sats = LIVE_FIXTURES / "satellites"
         self.tle = {g: (sats / f"tle_{g}.txt").read_bytes() for g in ("stations", "visual")}
         self.quakes = (LIVE_FIXTURES / "events" / "summary_2.5_day.geojson").read_bytes()
+        mesh = FIXTURES / "mesh"
+        self.buildings = (mesh / "overpass_buildings.json").read_bytes()
+        self.tiles = {p.stem: p.read_bytes() for p in mesh.glob("terrarium_*.png")}
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         host, url = request.url.host, str(request.url)
@@ -163,6 +166,13 @@ class _FixtureFeeds:
                 return httpx.Response(200, content=self.tle[group])
         if host == "earthquake.usgs.gov" and url.endswith("summary/2.5_day.geojson"):
             return httpx.Response(200, content=self.quakes)
+        if "overpass" in host or url.endswith("/api/interpreter"):
+            return httpx.Response(200, content=self.buildings)  # the mesh's building query
+        if host == "s3.amazonaws.com" and "/terrarium/" in url:
+            z, x, y = request.url.path.removesuffix(".png").split("/")[-3:]
+            tile = self.tiles.get(f"terrarium_{z}_{x}_{y}")
+            if tile is not None:
+                return httpx.Response(200, content=tile)
         return httpx.Response(404)
 
 
@@ -184,8 +194,16 @@ class MockWallClock:
 class FakePhoneThread:
     """Runs the fake phone on its own asyncio loop in a daemon thread."""
 
-    def __init__(self, url: str, tour: Tour | None = None, duration_s: float = 3600.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        tour: Tour | None = None,
+        duration_s: float = 3600.0,
+        settings: dict | None = None,
+    ) -> None:
         self.url = url
+        #: Phone-side settings the fake phone reports (look, passthrough, marker).
+        self.settings = settings
         self.tour = tour or landmark_tour()
         self.script = tour_script(self.tour)
         self.duration_s = duration_s
@@ -204,6 +222,7 @@ class FakePhoneThread:
                     lat=MOCK_LAT,
                     lon=MOCK_LON,
                     north_offset_deg=tour_north_offset(self.tour),
+                    settings=self.settings,
                 )
             )
         except ConnectionClosedOK:

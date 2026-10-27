@@ -230,7 +230,8 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         else:
             msize = MARKER_MIN_PX + 4
         markers.append((hl, e.distance_m or 1e9, p.x, p.y, msize, e))
-        anchors[e.id] = (p.x + msize / 2, p.y - msize / 2)
+        # The info card goes below the marker's label (which sits to its right).
+        anchors[e.id] = (p.x - msize / 2 - 24, p.y + TAG_H_PX / 2 + 8)
 
     # Tracked objects are points or squares (God's Eye View detection overlay). Every one is drawn;
     # its label is dropped when it would overprint another label or the status corner, keeping the
@@ -305,6 +306,9 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
             items.append(PointerRing(x, y, solid=inp.snapped_id is not None))
 
     items.append(_status_items(inp.status))
-    if inp.attribution and any(e.kind == "landmark" for e in inp.entities):
-        items.append(Text(w - 420, h - 40, inp.attribution, (160, 160, 160)))
+    if inp.attribution and (
+        inp.mesh is not None or any(e.kind == "landmark" for e in inp.entities)
+    ):
+        tw = len(inp.attribution) * TAG_CHAR_W_PX * MARKER_LABEL_SCALE
+        items.append(Text(max(10.0, w - tw - 30), h - 40, inp.attribution, (160, 160, 160)))
     return items

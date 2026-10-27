@@ -445,7 +445,8 @@ def compose_frame(
     params: Mapping[str, float] | None = None,
     internal_size: tuple[int, int] | None = DEFAULT_INTERNAL_SIZE,
 ) -> np.ndarray:
-    """The whole frame as a ``size`` BGR uint8 array: backdrop, overlay, then the look."""
+    """The whole frame as a ``size`` BGR uint8 array: backdrop + mesh through the look, then the
+    tinted HUD (markers, labels, cards) on top."""
     if look not in LOOKS:
         raise ValueError(f"unknown look {look!r}; expected one of {LOOKS}")
     ensure_app()
@@ -464,11 +465,16 @@ def compose_frame(
         if backdrop is not None
         else np.zeros((ih, iw, 3), np.uint8)
     )
-    frame = _paint_over(canvas, items, size, look, params)
+    # The look is applied to the world (camera backdrop + world mesh) only. Markers, labels, cards
+    # and the status corner are drawn afterwards, sharp at display resolution and tinted for the
+    # look, so text stays legible (≥ 24 px) instead of being pixelated and vignetted.
+    world_items = [it for it in items if isinstance(it, WireMesh)]
+    hud_items = [it for it in items if not isinstance(it, (Backdrop, WireMesh))]
+    frame = _paint_over(canvas, world_items, size, look, params) if world_items else canvas
     frame = looks_mod.apply_look(look, frame, t_s, params)
     if (iw, ih) != tuple(size):
         frame = cv2.resize(frame, size, interpolation=cv2.INTER_LINEAR)
-    return frame
+    return _paint_over(frame, hud_items, size, look, params)
 
 
 def _bgr_to_qimage(bgr: np.ndarray) -> QImage:

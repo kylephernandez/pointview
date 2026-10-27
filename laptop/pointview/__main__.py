@@ -75,6 +75,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--passthrough", action="store_true", help="show the VITURE camera behind the overlay"
     )
+    p.add_argument(
+        "--no-mesh", action="store_true", help="no world mesh (wireframe of the surroundings)"
+    )
     p.add_argument("--no-live", action="store_true", help="no live data layers (God's Eye View)")
     p.add_argument(
         "--mock-tour",
@@ -109,6 +112,22 @@ def make_live_layers(args: argparse.Namespace) -> list[Layer]:
         EventLayer(cache_dir / "events.sqlite", client=client),
         VesselLayer(),
     ]
+
+
+def make_mesh_source(args: argparse.Namespace):
+    """OSM buildings + terrain wireframe, cached on disk (most recent model works offline). In
+    --mock it is built from the recorded fixtures around the mock location."""
+    from pointview.mesh import OsmTerrainMeshSource
+
+    if args.mock and not args.live_landmarks:
+        from pointview import mock
+
+        return OsmTerrainMeshSource(
+            Path(tempfile.mkdtemp(prefix="pointview-mock-mesh-")), client=mock.live_client()
+        )
+    cache_dir = (args.cache.parent if args.cache else default_cache().parent) / "mesh"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return OsmTerrainMeshSource(cache_dir)
 
 
 def run(args: argparse.Namespace) -> RunStats:
@@ -168,6 +187,8 @@ def run(args: argparse.Namespace) -> RunStats:
 
             wall_clock = mock.MockWallClock()
 
+    mesh_source = None if args.no_mesh else make_mesh_source(args)
+
     renderer = render.QtRenderer(args.screen, args.screen_index, glasses.display_size, pump=False)
     app = PointViewApp(
         glasses,
@@ -179,6 +200,7 @@ def run(args: argparse.Namespace) -> RunStats:
         look=args.look,
         passthrough=args.passthrough,
         wall_clock=wall_clock,
+        mesh_source=mesh_source,
     )
 
     glasses.start()
@@ -189,7 +211,8 @@ def run(args: argparse.Namespace) -> RunStats:
         from pointview import mock
 
         tour = mock.aircraft_tour() if args.mock_tour == "aircraft" else mock.landmark_tour()
-        fake = mock.FakePhoneThread(f"ws://127.0.0.1:{phone.port}", tour)
+        settings = {"look": args.look, "passthrough": args.passthrough}
+        fake = mock.FakePhoneThread(f"ws://127.0.0.1:{phone.port}", tour, settings=settings)
         fake.start()
 
     shots = args.screenshot_dir
@@ -205,12 +228,20 @@ def run(args: argparse.Namespace) -> RunStats:
             return
         elapsed = time.monotonic() - t_start
         if elapsed >= next_shot[0]:
-            render.save_png(items, shots / f"frame_{elapsed:05.1f}s.png", glasses.display_size)
+            render.save_png(
+                items,
+                shots / f"frame_{elapsed:05.1f}s.png",
+                glasses.display_size,
+                app.look or "normal",
+                elapsed,
+            )
             next_shot[0] += args.screenshot_every
         # The first card, then again once it shows its Wikipedia summary (fetched in the background).
         cards = [i for i in items if isinstance(i, InfoCard)]
         if cards and (not saved_info[0] or (saved_info[0] == 1 and cards[0].footer)):
-            render.save_png(items, shots / "info_card.png", glasses.display_size)
+            render.save_png(
+                items, shots / "info_card.png", glasses.display_size, app.look or "normal", elapsed
+            )
             saved_info[0] = 2 if cards[0].footer else 1
 
     timer = QTimer()
@@ -231,13 +262,15 @@ def run(args: argparse.Namespace) -> RunStats:
         timer.stop()
         wake.stop()
         app.close()
+        if mesh_source is not None:
+            mesh_source.close()
         phone.stop()
         glasses.stop()
         renderer.close()
         if fake is not None and fake.error is not None:
             log.error("fake phone failed: %r", fake.error)
     if shots:
-        render.save_png(app.items, shots / "last.png", glasses.display_size)
+        render.save_png(app.items, shots / "last.png", glasses.display_size, app.look or "normal")
     elapsed = time.monotonic() - t_start
     for layer in layers:
         n = getattr(layer, "frames_processed", None)

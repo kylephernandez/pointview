@@ -83,12 +83,25 @@ def fetch_tile(client: httpx.Client, key: TileKey, user_agent: str) -> bytes:
 # ------------------------------------------------------------------------------------- terrain
 
 
+#: Default floor for terrain heights (m above mean sea level): the water surface.
+SEA_LEVEL_FLOOR_M = 0.0
+
+
 class TerrainModel:
     """Elevation lookup over a set of decoded tiles of one zoom level. Immutable after creation,
     so it is safe to read from any thread."""
 
-    def __init__(self, tiles: Mapping[TileKey, np.ndarray], zoom: int = DEFAULT_ZOOM):
+    def __init__(
+        self,
+        tiles: Mapping[TileKey, np.ndarray],
+        zoom: int = DEFAULT_ZOOM,
+        floor_m: float | None = SEA_LEVEL_FLOOR_M,
+    ):
         self.zoom = zoom
+        #: Terrarium includes bathymetry (sea floor). Through see-through glasses you see the water
+        #: surface, so heights are clamped to this floor. None keeps raw values (needed for the
+        #: rare land below sea level, e.g. Death Valley or the Netherlands' polders).
+        self.floor_m = floor_m
         self._tiles = {(x, y): a for (z, x, y), a in tiles.items() if z == zoom}
 
     def __bool__(self) -> bool:
@@ -139,6 +152,8 @@ class TerrainModel:
         num = (np.where(ok, stack, 0.0) * w).sum(axis=0)
         with np.errstate(invalid="ignore", divide="ignore"):
             res = np.where(wsum > 1e-9, num / wsum, np.nan)
+        if self.floor_m is not None:
+            res = np.where(np.isnan(res), res, np.maximum(res, self.floor_m))
         return res
 
     def elevation_at(self, lat: float, lon: float) -> float | None:

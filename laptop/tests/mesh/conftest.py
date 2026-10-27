@@ -7,17 +7,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from pointview import world
-from tests.mesh import _world_ref_mesh
 from tests.mesh._helpers import FakeServer
 
 MESH_FIXTURES = Path(__file__).parent.parent / "fixtures" / "mesh"
-
-
-@pytest.fixture(autouse=True)
-def _ref_world(monkeypatch):
-    """world.enu_from_geodetic may still be a stub; use the WGS84 reference."""
-    monkeypatch.setattr(world, "enu_from_geodetic", _world_ref_mesh.enu_from_geodetic)
 
 
 @pytest.fixture(scope="session")
