@@ -37,8 +37,7 @@ SF = (37.8060, -122.4680)
 
 
 @pytest.fixture(autouse=True)
-def _ref_world(monkeypatch):
-    ref.install(monkeypatch)
+def _no_ais_key(monkeypatch):
     monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
 
 
@@ -161,9 +160,12 @@ def test_horizon_clamp_keeps_true_range(tmp_path):
     layer = make_events(tmp_path)
     try:
         e = loaded(layer, ctx())[0]
-        true_yaw, true_pitch, true_rng = ref.look_angles(
+        true_yaw, true_pitch, true_rng = world.look_angles(
             *ADELAIDE, 0.0, -36.4594, 138.5321, -10000.0
         )
+        # The spherical reference agrees with the ellipsoid to well under 0.1°.
+        ref_yaw, ref_pitch, _ = ref.look_angles(*ADELAIDE, 0.0, -36.4594, 138.5321, -10000.0)
+        assert abs(ref_yaw - true_yaw) < 0.1 and abs(ref_pitch - true_pitch) < 0.1
         assert true_pitch < -1.0  # below the horizon: curvature plus depth
         assert e.world_pitch_deg == 0.0
         assert e.world_yaw_deg == pytest.approx(true_yaw)
@@ -430,7 +432,7 @@ def test_vessel_entity_and_dead_reckoned_position():
         assert e0.id == "ais:366999001"
         assert e0.kind == "vessel"
         assert e0.label == "TEST VESSEL ONE"
-        assert e0.world_yaw_deg == pytest.approx(0.0, abs=0.5)
+        assert abs(world.wrap_deg_signed(e0.world_yaw_deg)) < 0.5
         assert 4500 < e0.distance_m < 5500
         assert e0.geo.alt_m == 0.0
         assert e0.meta["mmsi"] == "366999001" and e0.meta["sog_kn"] == "10.0"
@@ -439,7 +441,8 @@ def test_vessel_entity_and_dead_reckoned_position():
         assert e1.geo.lon > e0.geo.lon
         moved = world.haversine_m(e0.geo.lat, e0.geo.lon, e1.geo.lat, e1.geo.lon)
         assert moved == pytest.approx(1543.3, rel=0.01)
-        assert e1.world_yaw_deg > e0.world_yaw_deg + 10  # swung toward the east
+        swing = world.wrap_deg_signed(e1.world_yaw_deg - e0.world_yaw_deg)
+        assert swing > 10  # swung toward the east
     finally:
         layer.close()
 
