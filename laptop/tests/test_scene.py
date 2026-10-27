@@ -3,12 +3,14 @@ import itertools
 from pointview import world
 from pointview.entities import Entity, SizeDeg
 from pointview.interfaces import (
+    CLASS_COLORS,
     Alignment,
     Brackets,
     Crosshair,
     EdgeArrow,
     InfoCard,
     LandmarkLabel,
+    Marker,
     PointerRing,
     StatusCorner,
     Tag,
@@ -68,12 +70,14 @@ def test_tag_and_cards_follow_privacy_rules():
     assert card.lines == ("~900 m", "line one", "line two") and card.footer
 
 
-def test_detection_drawn_centered_with_brackets_and_tag():
+def test_detection_drawn_as_centered_marker_with_label():
     items = scene([ent("det:1", "vehicle", "car", 0.0, dist=15, size=SizeDeg(4, 3))])
-    (b,) = of(items, Brackets)
-    (t,) = of(items, Tag)
-    assert abs(b.x + b.w / 2 - 960) < 1 and abs(b.y + b.h / 2 - 540) < 1
-    assert t.text == "car · ~15 m" and t.y < b.y
+    (m,) = of(items, Marker)
+    assert abs(m.x - 960) < 1 and abs(m.y - 540) < 1
+    assert m.shape == "square" and m.label == "car · ~15 m"
+    assert not of(items, Brackets) and not of(items, Tag)
+    (m,) = of(scene([ent("det:1", "vehicle", "car", 0.0)], marker_shape="point"), Marker)
+    assert m.shape == "point"
 
 
 def test_offscreen_and_behind_are_skipped_or_arrowed():
@@ -137,21 +141,21 @@ def test_status_unaligned_and_no_phone():
     assert lines[0] == "phone: searching" and "not aligned: tap Align" in lines
 
 
-def test_crowded_tags_declutter_nearest_first_and_stay_on_screen():
+def test_crowded_marker_labels_declutter_but_every_object_is_drawn():
     crowd = [
         ent(f"det:{i}", "person", "person", 0.2 * i, dist=10.0 + i, size=SizeDeg(1, 3))
         for i in range(8)
     ]
     crowd.append(ent("det:edge", "person", "person", -22.9, dist=5, size=SizeDeg(1, 3)))
     items = scene(crowd, snapped_id="det:7")
-    tags = of(items, Tag)
-    assert len(of(items, Brackets)) == 9  # every object keeps its brackets
-    assert any(t.highlighted for t in tags)  # the selected tag always shows
-    assert "person · ~5 m" in {t.text for t in tags}  # the nearest unselected one too
-    assert len(tags) < 9
-    for t in tags:
-        half = len(t.text) * 15 / 2
-        assert t.x - half >= 0 and t.x + half <= DISPLAY[0]
+    markers = of(items, Marker)
+    assert len(markers) == 9  # every object keeps its marker
+    labelled = [m for m in markers if m.label]
+    assert any(m.highlighted and m.label for m in markers)  # the selected label always shows
+    assert len(labelled) < 9
+    status_box = (0, 0, 360, 170)
+    for m in labelled:
+        assert not (m.x < status_box[2] and m.y < status_box[3]) or m.highlighted
 
 
 def test_live_entity_marker_and_card():
@@ -165,9 +169,18 @@ def test_live_entity_marker_and_card():
         distance_m=12_400,
         meta={"route": "SFO → LAX", "type": "A320", "altitude_ft": "11000", "squawk": "1200"},
     )
-    items = scene([plane])
-    (b,) = of(items, Brackets)
-    assert b.w == 36 and of(items, Tag)[0].text == "UAL123 · ~12.4 km"
+    (m,) = of(scene([plane]), Marker)
+    assert m.label == "UAL123 · ~12.4 km" and m.color == CLASS_COLORS["aircraft"]
     card = info_for(plane)
     assert card.title == "UAL123"
     assert card.lines == ("~12.4 km", "SFO → LAX", "A320", "alt ft 11000")
+
+
+def test_mesh_is_drawn_first():
+    import numpy as np
+
+    from pointview.interfaces import WireMesh
+
+    mesh = WireMesh(np.zeros((1, 4), np.float32), (0, 200, 255))
+    items = scene([ent("det:1", "vehicle", "car", 0.0)], mesh=mesh)
+    assert items[0] is mesh

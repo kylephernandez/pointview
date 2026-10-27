@@ -17,18 +17,19 @@ from pointview.interfaces import (
     STATUS_OK,
     STATUS_WARN,
     Alignment,
-    Brackets,
     Color,
     Crosshair,
     DrawItem,
     EdgeArrow,
     InfoCard,
     LandmarkLabel,
+    Marker,
+    MarkerShape,
     PointerRing,
     Quat,
     StatusCorner,
-    Tag,
     Text,
+    WireMesh,
 )
 
 #: Landmarks this far outside the display's horizontal FOV still get an edge arrow.
@@ -83,6 +84,10 @@ class SceneInput:
     info: InfoContent | None = None
     show_crosshair: bool = False
     attribution: str | None = None
+    #: How tracked objects (detections and live data) are drawn (the phone's choice).
+    marker_shape: MarkerShape = "square"
+    #: Projected world mesh, drawn first (under everything else).
+    mesh: WireMesh | None = None
 
 
 def format_distance(d: float | None) -> str | None:
@@ -117,8 +122,13 @@ LIVE_META_LABELS: dict[str, str] = {
     "mag": "M",
     "destination": "to ",
 }
-#: Marker size (px) for live entities, which have no angular size.
-LIVE_MARKER_PX = 36.0
+#: Tracked-object marker size limits (px).
+MARKER_MIN_PX = 12.0
+MARKER_MAX_PX = 40.0
+#: Marker labels use MIN_TEXT_PX text, smaller than the 28 px tag estimate below.
+MARKER_LABEL_SCALE = 24 / 28
+#: Top-left area the status corner occupies; marker labels avoid it.
+STATUS_CORNER_BOX = (0.0, 0.0, 360.0, 170.0)
 
 
 def info_for(
@@ -187,9 +197,8 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
 
     landmarks: list[tuple[float, float, Entity]] = []
     arrows: list[tuple[bool, float, Entity]] = []
-    tags: list[tuple[bool, float, float, float, Entity]] = []
+    markers: list[tuple[bool, float, float, float, float, Entity]] = []
     for e in inp.entities:
-        color = CLASS_COLORS[e.kind]
         hl = e.id == inp.snapped_id
         p = world.project_to_display(
             e.world_yaw_deg,
@@ -213,35 +222,31 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         if not (p.in_front and p.on_screen):
             continue
         size = e.size_deg
-        default_px = LIVE_MARKER_PX if e.kind in LIVE_KINDS else 60
-        bw = (
-            world.angular_size_to_px(size.w, inp.display_size, inp.display_fov_deg)
-            if size
-            else default_px
-        )
-        bh = (
-            world.angular_size_to_px(size.h, inp.display_size, inp.display_fov_deg)
-            if size
-            else default_px
-        )
-        bw, bh = max(bw, 24.0), max(bh, 24.0)
-        items.append(Brackets(p.x - bw / 2, p.y - bh / 2, bw, bh, color, hl))
-        tags.append((hl, e.distance_m or 1e9, p.x, p.y - bh / 2 - 8, e))
-        anchors[e.id] = (p.x + bw / 2, p.y - bh / 2)
+        if size is not None:  # detections: scale the marker with the object, within limits
+            px = world.angular_size_to_px(
+                min(size.w, size.h), inp.display_size, inp.display_fov_deg
+            )
+            msize = _clamp(px * 0.5, MARKER_MIN_PX, MARKER_MAX_PX)
+        else:
+            msize = MARKER_MIN_PX + 4
+        markers.append((hl, e.distance_m or 1e9, p.x, p.y, msize, e))
+        anchors[e.id] = (p.x + msize / 2, p.y - msize / 2)
 
-    # Tags: the selected one first, then nearest first; skip a tag that would overprint a placed one
-    # (its brackets still show). Keep tags inside the display.
-    placed: list[tuple[float, float, float, float]] = []
-    for hl, _d, x, y, e in sorted(tags, key=lambda t: (not t[0], t[1])):
+    # Tracked objects are points or squares (God's Eye View detection overlay). Every one is drawn;
+    # its label is dropped when it would overprint another label or the status corner, keeping the
+    # selected one first, then the nearest.
+    placed: list[tuple[float, float, float, float]] = [STATUS_CORNER_BOX]
+    for hl, _d, x, y, msize, e in sorted(markers, key=lambda t: (not t[0], t[1])):
         text = entity_tag_text(e)
-        tw, th = len(text) * TAG_CHAR_W_PX, TAG_H_PX
-        x = _clamp(x, tw / 2 + 8, w - tw / 2 - 8)
-        y = _clamp(y, th + 4, h - 4)
-        box = (x - tw / 2, y - th, x + tw / 2, y)
-        if not hl and any(_overlaps(box, b) for b in placed):
-            continue
-        placed.append(box)
-        items.append(Tag(x, y, text, CLASS_COLORS[e.kind], hl))
+        tw, th = len(text) * TAG_CHAR_W_PX * MARKER_LABEL_SCALE, TAG_H_PX
+        lx = x + msize / 2 + 8
+        box = (lx, y - th / 2, lx + tw, y + th / 2)
+        show = hl or (box[2] <= w and not any(_overlaps(box, b) for b in placed))
+        if show:
+            placed.append(box)
+        items.append(
+            Marker(x, y, inp.marker_shape, CLASS_COLORS[e.kind], msize, text if show else None, hl)
+        )
 
     # Edge arrows, stacked per side so neighbours don't overprint each other.
     for right in (False, True):
@@ -266,6 +271,9 @@ def build_scene(inp: SceneInput) -> list[DrawItem]:
         text = f"{e.label} · {dist}" if dist and hl else e.label
         items.append(LandmarkLabel(x, y_text, y, text, CLASS_COLORS["landmark"], hl))
         anchors[e.id] = (x + 20, y_text + CARD_GAP_PX)
+
+    if inp.mesh is not None:
+        items.insert(0, inp.mesh)
 
     if inp.show_crosshair:
         items.append(Crosshair(w / 2, h / 2))
