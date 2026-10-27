@@ -25,11 +25,15 @@ from pathlib import Path
 import cv2
 
 from pointview.glasses.pose_buffer import PoseBuffer
-from pointview.interfaces import CameraIntrinsics, Clock, Frame, Pose, Quat, now
+from pointview.interfaces import IDENTITY_QUAT, CameraIntrinsics, Clock, Frame, Pose, Quat, now
 
 #: With realtime=False, poses this far ahead of the current frame are pre-loaded so that
 #: interpolation (not extrapolation) is used for the frame time.
 _LOOKAHEAD_S = 0.1
+
+#: Size of the mock tracking frames. Deliberately not the front camera's size, so callers cannot
+#: assume the two are equal (the real tracking cameras differ from the front camera).
+TRACKING_SIZE = (640, 480)
 
 
 def load_pose_csv(path: Path) -> list[Pose]:
@@ -83,6 +87,9 @@ class MockGlasses:
         self._next_pose = (0, 0)  # (cycle, index) of the next pose sample to feed
         self._pose_done = False
         self._frame: Frame | None = None
+        self._tracking_cache: tuple[Frame, Frame] | None = None  # (source frame, tracking frame)
+        #: Every set_tracking_exposure call, as (exposure_ms, gain); the mock only records them.
+        self.tracking_exposure_calls: list[tuple[float | None, float | None]] = []
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -99,6 +106,39 @@ class MockGlasses:
     @property
     def display_fov_deg(self) -> tuple[float, float]:
         return self._display_fov
+
+    # ------------------------------------------------------- TrackingCameraSource (contract s.9)
+
+    @property
+    def tracking_camera_intrinsics(self) -> CameraIntrinsics:
+        """The front intrinsics rescaled to the (stretched) 640x480 tracking frame: same view,
+        different size and focal length."""
+        i = self._intrinsics
+        w, h = TRACKING_SIZE
+        sx, sy = w / i.width, h / i.height
+        return CameraIntrinsics(i.fx * sx, i.fy * sy, i.cx * sx, i.cy * sy, w, h, i.dist)
+
+    @property
+    def tracking_camera_to_head_quat(self) -> Quat:
+        return IDENTITY_QUAT
+
+    def latest_tracking_frame(self) -> Frame | None:
+        """The newest video frame as 640x480 gray replicated to BGR (same timestamp)."""
+        src = self.latest_frame()
+        if src is None:
+            return None
+        cached = self._tracking_cache
+        if cached is not None and cached[0] is src:
+            return cached[1]
+        gray = cv2.cvtColor(src.bgr, cv2.COLOR_BGR2GRAY)
+        gray = cv2.resize(gray, TRACKING_SIZE, interpolation=cv2.INTER_AREA)
+        out = Frame(src.t, cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
+        self._tracking_cache = (src, out)
+        return out
+
+    def set_tracking_exposure(self, exposure_ms: float | None, gain: float | None = None) -> None:
+        """Recorded no-op."""
+        self.tracking_exposure_calls.append((exposure_ms, gain))
 
     @property
     def t0(self) -> float:

@@ -30,6 +30,7 @@ class FakeLib:
         self.status = 0
         self.imu_cb = None
         self.cam_cb = None
+        self.stereo_cb = None
         self.created = False
 
         def rec(name, ret=0):
@@ -64,6 +65,7 @@ class FakeLib:
 
     def _register(self, handle, pose_cb, vsync_cb, imu_cb, stereo_cb):
         self.imu_cb = imu_cb
+        self.stereo_cb = stereo_cb
         return 0
 
     def _cam_start(self, cam, cb, user):
