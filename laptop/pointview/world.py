@@ -19,7 +19,14 @@ import cv2
 import numpy as np
 
 from pointview.entities import Entity
-from pointview.interfaces import Alignment, CameraIntrinsics, Quat, Vec3, WorldMesh
+from pointview.interfaces import (
+    Alignment,
+    CameraIntrinsics,
+    PhoneVisualFix,
+    Quat,
+    Vec3,
+    WorldMesh,
+)
 
 SNAP_RADIUS_DEG = 5.0
 SNAP_HYSTERESIS_DEG = 2.0
@@ -776,3 +783,40 @@ def project_mesh(
         alive[ci] = ok
         seg, dist = seg[alive], dist[alive]
     return seg, dist.astype(np.float32)
+
+
+# ----------------------------------------------------------------- v2.2: visual phone alignment
+
+
+def visual_phone_to_head_deg(
+    fix: PhoneVisualFix, head_quat_at_fix: Quat, phone_quat: Quat
+) -> float:
+    """The phone-to-head yaw offset implied by one camera sighting (contracts §12).
+
+    The camera gives the phone's attitude in the head frame; the head pose at the frame time takes it
+    to the tracking frame T. The phone's own attitude ``phone_quat`` (in its reference frame R, at the
+    same moment) gives the same top-edge direction in R. The yaw difference T − R is exactly what the
+    one-tap Align measures, but now continuously and without looking at anything far away.
+    Returns NaN when the phone points within 15° of straight up or down (yaw is ill-defined)."""
+    top_head = quat_rotate(fix.head_from_phone, (0.0, 1.0, 0.0))
+    yaw_t, pitch_t = yaw_pitch_from_vector(quat_rotate(head_quat_at_fix, top_head))
+    yaw_r, pitch_r = yaw_pitch_from_vector(phone_pointer_vector(phone_quat))
+    if abs(pitch_t) > 75.0 or abs(pitch_r) > 75.0:
+        return math.nan
+    return wrap_deg_signed(yaw_t - yaw_r)
+
+
+def blend_alignment(
+    alignment: Alignment, phone_to_head_deg: float, t: float, gain: float = 0.2
+) -> Alignment:
+    """Move ``alignment.phone_to_head_deg`` toward a new measurement by ``gain`` (circular, so 359°
+    and 1° average to 0°). The first measurement on an unaligned Alignment is taken as is.
+    north_offset_deg is unchanged (true north still comes from the compass or a landmark)."""
+    if math.isnan(phone_to_head_deg):
+        return alignment
+    if alignment.aligned_at is None:
+        new = phone_to_head_deg
+    else:
+        step = wrap_deg_signed(phone_to_head_deg - alignment.phone_to_head_deg)
+        new = alignment.phone_to_head_deg + gain * step
+    return replace(alignment, phone_to_head_deg=wrap_deg_signed(new), aligned_at=t)

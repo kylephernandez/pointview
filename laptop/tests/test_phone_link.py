@@ -473,3 +473,15 @@ def test_thread_wrapper_start_error_is_raised():
         with pytest.raises(OSError):
             busy.start()
         assert not busy.running()
+
+
+async def test_fiducial_persists_until_null(link, url):
+    async with connect(url) as ws:
+        await send_all(ws, {**sample(1.79e12), "fiducial": {"id": 7, "side_mm": 40.0}})
+        await until(lambda: link.latest() is not None)
+        await send_all(ws, sample(1.79e12 + 16))
+        await until(lambda: link.stats().messages == 2)
+        assert link.latest().fiducial.id == 7 and link.latest().fiducial.side_mm == 40.0
+        await send_all(ws, {**sample(1.79e12 + 32), "fiducial": None})
+        await until(lambda: link.stats().messages == 3)
+        assert link.latest().fiducial is None

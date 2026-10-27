@@ -60,7 +60,17 @@ export interface PhoneMessage {
   passthrough?: boolean;
   /** Tracked-object style; omitted = unchanged. */
   marker?: MarkerShape;
+  /** Track mode: the ArUco DICT_4X4_50 marker on screen (side in mm), null when stopped; omitted = unchanged. */
+  fiducial?: Fiducial | null;
 }
+
+/** The tracking marker the phone shows so the glasses' camera can follow it (contracts §12). */
+export interface Fiducial {
+  id: number;
+  side_mm: number;
+}
+/** ArUco DICT_4X4_50 ids. */
+export const FIDUCIAL_ID_MAX = 49;
 
 export type HapticStyle = 'snap' | 'select' | 'align_ok' | 'error';
 
@@ -75,4 +85,5 @@ export type LaptopMessage =
       look?: Look;
       passthrough?: boolean;
       marker?: MarkerShape;
-    };
+    }
+  | { type: 'fiducial'; id: number; tracked?: boolean };

@@ -75,6 +75,29 @@
           ]
         }
       }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "const": "fiducial"
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 49,
+          "description": "The marker id this session's phone should show (chosen at random by the laptop)."
+        },
+        "tracked": {
+          "type": "boolean",
+          "description": "True while the glasses see and have confirmed the phone."
+        }
+      }
     }
   ]
 }

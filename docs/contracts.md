@@ -264,3 +264,22 @@ See the docstrings in `laptop/pointview/world.py`.
 * **Accuracy caveat:** the phone's GPS is good to ~5 m. Far geometry lines up well; geometry within ~30 m can be off by several degrees. Two things will improve it later:
   * 6DoF VIO for walking smoothness;
   * a "nudge" alignment, using a long-press on a building corner.
+
+## 12. Contract v2.2: the glasses' camera tracks the phone (automatic alignment)
+
+* **What it does:** in Track mode the phone shows an ArUco marker (`DICT_4X4_50`). The marker is drawn upright on the screen with a white quiet zone, so the marker frame equals the phone frame P. The glasses' front camera detects it and solves its pose with PnP (`SOLVEPNP_IPPE_SQUARE`), then converts camera → head with `Calibration.camera_to_head_quat`. The result is a **`PhoneVisualFix`**: `head_from_phone`, plus position in the head frame.
+* **Identity:**
+  1. The laptop picks a random marker id per session and sends `{"type": "fiducial", "id": N}` to the phone.
+  2. The phone reports `fiducial: {id, side_mm}` while it shows the marker.
+  3. A fix only counts (`confirmed`) when the rotation the camera sees matches the phone's own gyro over the last ~1 s. Concretely, two checks must pass:
+     * the visual angular velocity versus `omega` agree, as a correlation or residual;
+     * the attitude change between frames is consistent.
+
+  So a photo of the marker, or another phone, won't steer the pointer.
+* **Alignment:** each confirmed fix updates `Alignment.phone_to_head_deg` through `world.visual_phone_to_head_deg` and `world.blend_alignment` (circular low-pass). This replaces the one-tap Align whenever the phone is in view. When it leaves the view, the phone's IMU carries on from the last offset (v1 behavior). True north still comes from the compass, or from a long-press on a landmark.
+* **Module:** `pointview/phonetrack/` implements `PhoneTracker`. Detection runs on its own thread at reduced resolution, with a search region around the last fix. `update()` never blocks.
+* **Hand position:** `position_head_m` gives where the hand is. That lets the pointer ray start at the hand instead of the eye, which removes the parallax described in the design doc (step 7). Its accuracy depends on `side_mm` being right.
+* **Phone:**
+  * Track mode shows the marker at full screen brightness. INFO stays usable.
+  * The phone sends `fiducial` (or `null` when Track mode stops); an omitted value means unchanged.
+  * The laptop's status/fiducial message says when it is tracked.

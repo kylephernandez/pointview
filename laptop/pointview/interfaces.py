@@ -189,6 +189,15 @@ class ButtonEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class Fiducial:
+    """What the phone reports about the marker it shows in Track mode."""
+
+    id: int
+    #: Marker side (black border included, quiet zone excluded) in millimeters on the screen.
+    side_mm: float
+
+
+@dataclass(frozen=True, slots=True)
 class PhoneState:
     """One validated phone sample (docs/phone-protocol.md), plus laptop-side timing."""
 
@@ -217,6 +226,8 @@ class PhoneState:
     )
     #: How tracked objects are drawn.
     marker: MarkerShape = "square"
+    #: The tracking marker the phone is showing, if it is in Track mode (contracts §12).
+    fiducial: Fiducial | None = None
     #: Sensor look chosen on the phone (persists when a message omits it).
     look: Look = "normal"
     #: Show the camera image behind the overlay (needed for looks to be visible).
@@ -296,6 +307,42 @@ class Layer(Protocol):
     name: str
 
     def update(self, ctx: LayerContext) -> list[Entity]: ...
+
+    def close(self) -> None: ...
+
+
+# --------------------------------------------------------------------------- phone visual tracking
+
+
+@dataclass(frozen=True, slots=True)
+class PhoneVisualFix:
+    """The phone seen by the glasses' front camera (contracts §12).
+
+    The phone shows an ArUco marker (DICT_4X4_50) drawn upright on its screen, so the marker's
+    axes equal the phone frame P (x right edge, y top edge, z out of the screen)."""
+
+    #: Laptop time of the camera frame.
+    t: float
+    #: Rotates phone-frame vectors into the head frame H (camera → head already applied).
+    head_from_phone: Quat
+    #: Marker center in the head frame, meters (approximate: depends on the screen's real size).
+    position_head_m: Vec3
+    #: 0..1: how well the camera-seen rotation matches the phone's own gyro (identity check).
+    identity_score: float
+    #: True once the identity check passed; only confirmed fixes may change the alignment.
+    confirmed: bool
+    marker_id: int
+
+
+@runtime_checkable
+class PhoneTracker(Protocol):
+    """Finds the user's phone in the glasses' camera. Never blocks: works on its own thread."""
+
+    def update(
+        self, glasses: GlassesSource, phone_history: Sequence[PhoneState], marker_id: int | None
+    ) -> PhoneVisualFix | None:
+        """Hand over the latest inputs; returns the newest fix (≤ 0.5 s old) or None."""
+        ...
 
     def close(self) -> None: ...
 

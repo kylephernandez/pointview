@@ -155,6 +155,34 @@
         "square"
       ],
       "description": "Optional: how tracked objects are drawn. Omitted = unchanged (\"square\" at start)."
+    },
+    "fiducial": {
+      "description": "Optional: the ArUco DICT_4X4_50 marker the phone is showing in Track mode, or null when it stopped. Omitted = unchanged.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "side_mm"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 49
+            },
+            "side_mm": {
+              "type": "number",
+              "exclusiveMinimum": 5,
+              "maximum": 200
+            }
+          }
+        }
+      ]
     }
   }
 }

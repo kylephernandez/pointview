@@ -50,6 +50,7 @@ from pointview.interfaces import (
     ButtonEvent,
     ButtonName,
     Clock,
+    Fiducial,
     LayerName,
     Look,
     MarkerShape,
@@ -138,6 +139,7 @@ class PhoneLink:
         self._buttons: deque[ButtonEvent] = deque(maxlen=_MAX_PENDING_BUTTONS)
         self._layers: dict[LayerName, bool] = dict.fromkeys((*LAYER_KINDS, *EXTRA_TOGGLES), True)
         self._marker: MarkerShape = "square"
+        self._fiducial: Fiducial | None = None
         self._look: Look = "normal"
         self._passthrough = False
         self._offsets: deque[tuple[float, float]] = deque()
@@ -241,6 +243,9 @@ class PhoneLink:
             self._look = msg.get("look", self._look)
             self._passthrough = msg.get("passthrough", self._passthrough)
             self._marker = msg.get("marker", self._marker)
+            if "fiducial" in msg:  # null = Track mode stopped; omitted = unchanged
+                f = msg["fiducial"]
+                self._fiducial = None if f is None else Fiducial(int(f["id"]), float(f["side_mm"]))
             buttons: tuple[ButtonName, ...] = tuple(msg["buttons"])
             state = PhoneState(
                 t_ms=float(msg["t_ms"]),
@@ -258,6 +263,7 @@ class PhoneLink:
                 look=self._look,
                 passthrough=self._passthrough,
                 marker=self._marker,
+                fiducial=self._fiducial,
             )
             for name in buttons:
                 self._buttons.append(ButtonEvent(name=name, t_ms=state.t_ms, t=t))
