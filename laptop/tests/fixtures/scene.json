@@ -1,0 +1,68 @@
+{
+  "description": "Synthetic fixture world; see tools/make_fixtures.py",
+  "video": {
+    "file": "sample.mp4",
+    "fps": 30,
+    "frames": 180,
+    "width": 960,
+    "height": 540,
+    "frame_time": "frame i was rendered at t = i / fps on the pose_track clock"
+  },
+  "pose_track": {
+    "file": "pose_track.csv",
+    "hz": 200,
+    "seconds": 10.0,
+    "head_yaw_pitch": "yaw = 25 sin(2\u03c0\u00b70.1 t), pitch = 4 sin(2\u03c0\u00b70.23 t), deg"
+  },
+  "intrinsics": {
+    "fx": 685.5110432362151,
+    "fy": 685.5110432362151,
+    "cx": 480.0,
+    "cy": 270.0,
+    "width": 960,
+    "height": 540,
+    "dist": []
+  },
+  "markers_tracking_frame": [
+    {
+      "id": 1,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "color_bgr": [
+        0,
+        200,
+        255
+      ]
+    },
+    {
+      "id": 2,
+      "yaw_deg": 15.0,
+      "pitch_deg": -5.0,
+      "color_bgr": [
+        255,
+        220,
+        0
+      ]
+    },
+    {
+      "id": 3,
+      "yaw_deg": -20.0,
+      "pitch_deg": 3.0,
+      "color_bgr": [
+        120,
+        255,
+        140
+      ]
+    },
+    {
+      "id": 4,
+      "yaw_deg": 30.0,
+      "pitch_deg": 8.0,
+      "color_bgr": [
+        255,
+        120,
+        255
+      ]
+    }
+  ]
+}

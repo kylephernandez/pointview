@@ -1,0 +1,42 @@
+{
+    "callsign": "UAL2192",
+    "number": "2192",
+    "airline_code": "UAL",
+    "airport_codes": "KBWI-KSFO-KSEA",
+    "_airport_codes_iata": "BWI-SFO-SEA",
+    "_airports": [
+        {
+            "name": "Baltimore/Washington International Thurgood Marshal Airport",
+            "icao": "KBWI",
+            "iata": "BWI",
+            "location": "Baltimore",
+            "countryiso2": "US",
+            "lat": 39.1754,
+            "lon": -76.668297,
+            "alt_feet": 146.0,
+            "alt_meters": 44.5
+        },
+        {
+            "name": "San Francisco International Airport",
+            "icao": "KSFO",
+            "iata": "SFO",
+            "location": "San Francisco",
+            "countryiso2": "US",
+            "lat": 37.618999,
+            "lon": -122.375,
+            "alt_feet": 13.0,
+            "alt_meters": 3.96
+        },
+        {
+            "name": "Seattle Tacoma International Airport",
+            "icao": "KSEA",
+            "iata": "SEA",
+            "location": "Seattle",
+            "countryiso2": "US",
+            "lat": 47.449001,
+            "lon": -122.308998,
+            "alt_feet": 433.0,
+            "alt_meters": 131.98
+        }
+    ]
+}

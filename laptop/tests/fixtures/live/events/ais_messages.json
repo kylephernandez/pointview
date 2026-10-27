@@ -1,0 +1,93 @@
+{
+  "_comment": "HAND-WRITTEN, not recorded from AISStream (we have no API key). Shapes follow https://aisstream.io/documentation (MessageType / MetaData / Message.<MessageType>). MMSIs and names are made up.",
+  "position_report": {
+    "MessageType": "PositionReport",
+    "MetaData": {
+      "MMSI": 366999001,
+      "MMSI_String": 366999001,
+      "ShipName": "TEST VESSEL ONE@@@@",
+      "latitude": 37.85,
+      "longitude": -122.468,
+      "time_utc": "2026-10-27 01:00:00.318353 +0000 UTC"
+    },
+    "Message": {
+      "PositionReport": {
+        "Cog": 90.0,
+        "CommunicationState": 59916,
+        "Latitude": 37.85,
+        "Longitude": -122.468,
+        "MessageID": 1,
+        "NavigationalStatus": 0,
+        "Positionaccuracy": true,
+        "Raim": false,
+        "RateOfTurn": 0,
+        "RepeatIndicator": 0,
+        "Sog": 10.0,
+        "Spare": 0,
+        "SpecialManoeuvreIndicator": 0,
+        "Timestamp": 30,
+        "TrueHeading": 91,
+        "UserID": 366999001,
+        "Valid": true
+      }
+    }
+  },
+  "class_b_report": {
+    "MessageType": "StandardClassBPositionReport",
+    "MetaData": {
+      "MMSI": 366999002,
+      "ShipName": "",
+      "latitude": 37.80,
+      "longitude": -122.40,
+      "time_utc": "2026-10-27 01:00:05.000000 +0000 UTC"
+    },
+    "Message": {
+      "StandardClassBPositionReport": {
+        "Cog": 360.0,
+        "Latitude": 37.80,
+        "Longitude": -122.40,
+        "MessageID": 18,
+        "Sog": 102.3,
+        "TrueHeading": 511,
+        "UserID": 366999002,
+        "Valid": true
+      }
+    }
+  },
+  "static_data": {
+    "MessageType": "ShipStaticData",
+    "MetaData": {
+      "MMSI": 366999001,
+      "ShipName": "TEST VESSEL ONE@@@@",
+      "latitude": 37.85,
+      "longitude": -122.468,
+      "time_utc": "2026-10-27 01:00:10.000000 +0000 UTC"
+    },
+    "Message": {
+      "ShipStaticData": {
+        "AisVersion": 2,
+        "CallSign": "WDX1234",
+        "Destination": "OAKLAND@@@@@@@@@@@@@",
+        "Dimension": {"A": 150, "B": 30, "C": 15, "D": 15},
+        "Dte": false,
+        "Eta": {"Day": 28, "Hour": 14, "Minute": 30, "Month": 10},
+        "FixType": 1,
+        "ImoNumber": 9999991,
+        "MaximumStaticDraught": 9.5,
+        "MessageID": 5,
+        "Name": "TEST VESSEL ONE@@@@",
+        "RepeatIndicator": 0,
+        "Spare": false,
+        "Type": 70,
+        "UserID": 366999001,
+        "Valid": true
+      }
+    }
+  },
+  "invalid_position": {
+    "MessageType": "PositionReport",
+    "MetaData": {"MMSI": 366999003, "ShipName": "NOPOS", "latitude": 91.0, "longitude": 181.0, "time_utc": "2026-10-27 01:00:00.000000 +0000 UTC"},
+    "Message": {"PositionReport": {"Cog": 10.0, "Latitude": 91.0, "Longitude": 181.0, "Sog": 5.0, "UserID": 366999003, "Valid": true}}
+  },
+  "error_envelope": {"error": "Api Key Is Not Valid"}
+}
