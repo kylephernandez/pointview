@@ -622,12 +622,43 @@ def sun_direction(unix_time: float, lat: float, lon: float) -> tuple[float, floa
 EYE_HEIGHT_M = 1.6
 
 
+def _ecef_arrays(lat, lon, alt_m) -> np.ndarray:
+    """Vectorized WGS84 geodetic → ECEF; float64 (..., 3)."""
+    lat_r = np.asarray(lat, dtype=np.float64) * _RAD
+    lon_r = np.asarray(lon, dtype=np.float64) * _RAD
+    alt = np.asarray(alt_m, dtype=np.float64)
+    lat_r, lon_r, alt = np.broadcast_arrays(lat_r, lon_r, alt)
+    e2 = WGS84_F * (2.0 - WGS84_F)
+    sl, cl = np.sin(lat_r), np.cos(lat_r)
+    n = WGS84_A / np.sqrt(1.0 - e2 * sl * sl)
+    return np.stack(
+        [
+            (n + alt) * cl * np.cos(lon_r),
+            (n + alt) * cl * np.sin(lon_r),
+            (n * (1.0 - e2) + alt) * sl,
+        ],
+        axis=-1,
+    )
+
+
+def _enu_matrix(lat: float, lon: float) -> np.ndarray:
+    """Rows are the east, north, up unit vectors (in ECEF) at the given geodetic position."""
+    sp, cp = math.sin(lat * _RAD), math.cos(lat * _RAD)
+    sl, cl = math.sin(lon * _RAD), math.cos(lon * _RAD)
+    return np.array(
+        [[-sl, cl, 0.0], [-sp * cl, -sp * sl, cp], [cp * cl, cp * sl, sp]], dtype=np.float64
+    )
+
+
 def enu_from_geodetic(
     origin_lat: float, origin_lon: float, origin_alt_m: float, lat, lon, alt_m
 ) -> np.ndarray:
     """WGS84 points → local ENU meters at the origin. ``lat``/``lon``/``alt_m`` may be scalars or
     numpy arrays of equal shape; returns float64 (..., 3)."""
-    raise NotImplementedError
+    d = _ecef_arrays(lat, lon, alt_m) - np.asarray(
+        ecef_from_geodetic(origin_lat, origin_lon, origin_alt_m), dtype=np.float64
+    )
+    return d @ _enu_matrix(origin_lat, origin_lon).T
 
 
 def project_mesh(
@@ -647,5 +678,101 @@ def project_mesh(
     Returns (segments float32 (K, 4) in display px, clipped to the near plane and the display
     rectangle; distance float32 (K,) meters from the observer to each segment's midpoint). Edges
     entirely beyond ``max_range_m`` or behind the viewer are dropped. Uses the same display model
-    as project_to_display (x = W/2 + f·h.x/h.y, y = H/2 − f·h.z/h.y)."""
-    raise NotImplementedError
+    as project_to_display (x = W/2 + f·h.x/h.y, y = H/2 − f·h.z/h.y).
+
+    Frame choice: the mesh ENU frame (at mesh.origin) is mapped to the observer's ENU frame with
+    the exact rigid transform (origin offset plus the small rotation between the two local
+    frames), which costs one 3x3 matrix and is correct at any distance. Mesh vertices are treated
+    as exact ENU at their origin (the tangent plane); the sub-meter curvature drop within the
+    ~1 km mesh radius is not modelled. Then world → tracking uses yaw − north_offset and the
+    inverse head_quat, identical to world_to_head. Distance is to the midpoint of the original
+    (unclipped) edge. Degenerate (zero-length) clipped segments are dropped."""
+    empty = (np.zeros((0, 4), np.float32), np.zeros(0, np.float32))
+    verts = np.asarray(mesh.vertices)
+    edges = np.asarray(mesh.edges)
+    if len(verts) == 0 or len(edges) == 0:
+        return empty
+    w_px, h_px = display_size
+    f = display_focal_px(display_size, display_fov_deg)
+
+    # mesh ENU → observer ENU: t + M @ v, M = E_obs · E_origin^T.
+    o = mesh.origin
+    t = enu_from_geodetic(observer_lat, observer_lon, observer_alt_m, o.lat, o.lon, o.alt_m)
+    m = _enu_matrix(observer_lat, observer_lon) @ _enu_matrix(o.lat, o.lon).T
+    # observer ENU → head: conj(head_quat) · Rz(-north_offset).
+    r = _mat_from_quat(quat_conj(quat_normalize(head_quat)))
+    c, s = math.cos(-north_offset_deg * _RAD), math.sin(-north_offset_deg * _RAD)
+    rz = np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
+    full = np.asarray(r, dtype=np.float64) @ rz @ m  # mesh ENU → head
+    h_off = np.asarray(r, dtype=np.float64) @ rz @ t  # origin offset in head frame
+    # float32 is ample for a ~1 km mesh (1e-4 m) and halves the memory traffic.
+    wv = verts.astype(np.float32) @ full.T.astype(np.float32) + h_off.astype(np.float32)
+    # Per-vertex outcodes against the view frustum (near plane, 4 sides) and the range sphere. An
+    # edge whose endpoints share any outcode bit lies wholly outside that half-space and is
+    # dropped before any per-edge arithmetic. Range is rotation invariant, so use head-frame vectors.
+    hx, hy, hz = wv[:, 0], wv[:, 1], wv[:, 2]
+    tx, ty = (w_px / 2.0) / f, (h_px / 2.0) / f
+    code = (
+        (hy < near_m).astype(np.uint8)
+        | ((hx < -tx * hy).astype(np.uint8) << 1)
+        | ((hx > tx * hy).astype(np.uint8) << 2)
+        | ((hz < -ty * hy).astype(np.uint8) << 3)
+        | ((hz > ty * hy).astype(np.uint8) << 4)
+        | ((hx * hx + hy * hy + hz * hz > max_range_m * max_range_m).astype(np.uint8) << 5)
+    )
+    ia = edges[:, 0].astype(np.intp)
+    ib = edges[:, 1].astype(np.intp)
+    ca, cb = code[ia], code[ib]
+    keep = np.flatnonzero((ca & cb) == 0)
+    if len(keep) == 0:
+        return empty
+    a = wv[ia[keep]]
+    b = wv[ib[keep]]
+    mid = a + b
+    dist = np.sqrt(np.einsum("ij,ij->i", mid, mid)) * 0.5
+    # Only edges touching a frustum side or the near plane need clipping; the rest are inside.
+    side = (ca | cb)[keep] & 0x1F
+    # Near-plane clip (h.y >= near_m), on the few edges that cross it.
+    cross = np.flatnonzero(side & 1)
+    if len(cross):
+        ac, bc = a[cross], b[cross]
+        ya, yb = ac[:, 1], bc[:, 1]
+        da = ya < near_m
+        tt = (near_m - ya) / (yb - ya)
+        p = ac + tt[:, None] * (bc - ac)
+        a[cross] = np.where(da[:, None], p, ac)
+        b[cross] = np.where(da[:, None], bc, p)
+
+    # Perspective projection: x = W/2 + f*h.x/h.y, y = H/2 - f*h.z/h.y.
+    seg = np.empty((len(a), 4), dtype=np.float32)
+    ra = f / a[:, 1]
+    rb = f / b[:, 1]
+    seg[:, 0] = w_px / 2.0 + a[:, 0] * ra
+    seg[:, 1] = h_px / 2.0 - a[:, 2] * ra
+    seg[:, 2] = w_px / 2.0 + b[:, 0] * rb
+    seg[:, 3] = h_px / 2.0 - b[:, 2] * rb
+
+    # Liang-Barsky against [0, W] x [0, H], on the edges that stick out of the frustum.
+    ci = np.flatnonzero(side)
+    if len(ci):
+        s = seg[ci]
+        ax, ay = s[:, 0], s[:, 1]
+        dx, dy = s[:, 2] - ax, s[:, 3] - ay
+        # Slab form of Liang-Barsky: per axis the entry/exit parameters are the sorted hits of
+        # the two borders. A zero delta is replaced by a tiny one, which sends the parameters to
+        # +-huge in the right direction (inside the slab: enter <= 0 <= 1 <= exit).
+        dx = np.where(dx == 0.0, np.float32(1e-12), dx)
+        dy = np.where(dy == 0.0, np.float32(1e-12), dy)
+        tx0, tx1 = -ax / dx, (w_px - ax) / dx
+        ty0, ty1 = -ay / dy, (h_px - ay) / dy
+        t0 = np.maximum(np.maximum(np.minimum(tx0, tx1), np.minimum(ty0, ty1)), 0.0)
+        t1 = np.minimum(np.minimum(np.maximum(tx0, tx1), np.maximum(ty0, ty1)), 1.0)
+        ok = t0 < t1
+        out = np.stack([ax + t0 * dx, ay + t0 * dy, ax + t1 * dx, ay + t1 * dy], axis=1)
+        np.clip(out[:, 0::2], 0.0, w_px, out=out[:, 0::2])
+        np.clip(out[:, 1::2], 0.0, h_px, out=out[:, 1::2])
+        seg[ci] = out
+        alive = np.ones(len(seg), dtype=bool)
+        alive[ci] = ok
+        seg, dist = seg[alive], dist[alive]
+    return seg, dist.astype(np.float32)
