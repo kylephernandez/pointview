@@ -36,9 +36,7 @@ log = logging.getLogger(__name__)
 
 OSM_ATTRIBUTION = "© OpenStreetMap contributors"
 WIKIPEDIA_ATTRIBUTION = "Wikipedia · CC BY-SA"
-USER_AGENT = (
-    "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/pointview)"
-)
+USER_AGENT = "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/kylephernandez/pointview)"
 
 OVERPASS_ENDPOINTS: tuple[str, ...] = (
     "https://overpass-api.de/api/interpreter",

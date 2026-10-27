@@ -18,7 +18,7 @@ TAGS = [
     "en:Palace of Fine Arts",
     "en:Crissy Field",
 ]
-UA = "PointView/0.1 (https://github.com/pointview/pointview; fixture recorder) httpx"
+UA = "PointView/0.1 (https://github.com/kylephernandez/pointview/pointview; fixture recorder) httpx"
 
 
 def fixture_name(tag: str) -> str:

@@ -75,9 +75,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--passthrough", action="store_true", help="show the VITURE camera behind the overlay"
     )
+    p.add_argument("--no-live", action="store_true", help="no live data layers (God's Eye View)")
+    p.add_argument(
+        "--mock-tour",
+        choices=("landmarks", "aircraft"),
+        default="landmarks",
+        help="mock: what the fake phone points at after Align",
+    )
     p.add_argument("--stats-json", type=Path, help="write the run counters here on exit")
     p.add_argument("-v", "--verbose", action="store_true")
     return p.parse_args(argv)
+
+
+def make_live_layers(args: argparse.Namespace) -> list[Layer]:
+    """Aircraft, satellites, earthquakes and (with AISSTREAM_API_KEY) ships. In --mock they read
+    recorded feeds through a fake HTTP client, unless --live-landmarks asks for the real network."""
+    from pointview.live.aircraft import AircraftLayer
+    from pointview.live.events import EventLayer, VesselLayer
+    from pointview.live.satellites import SatelliteLayer
+
+    client = None
+    cache_dir = args.cache.parent if args.cache else default_cache().parent
+    if args.mock and not args.live_landmarks:
+        from pointview import mock
+
+        client = mock.live_client()
+        cache_dir = Path(tempfile.mkdtemp(prefix="pointview-mock-live-"))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # adsb.lol's headers suggest a 500/day anonymous budget: poll every 30 s and dead-reckon between.
+    return [
+        AircraftLayer(cache_dir / "aircraft.sqlite", client=client, poll_s=30.0),
+        SatelliteLayer(cache_dir / "satellites.sqlite", client=client),
+        EventLayer(cache_dir / "events.sqlite", client=client),
+        VesselLayer(),
+    ]
 
 
 def run(args: argparse.Namespace) -> RunStats:
@@ -129,6 +160,14 @@ def run(args: argparse.Namespace) -> RunStats:
         landmark_layer = LandmarkLayer(cache, client=client)
         layers.append(landmark_layer)
 
+    wall_clock = time.time
+    if not args.no_live:
+        layers += make_live_layers(args)
+        if args.mock and not args.live_landmarks:
+            from pointview import mock
+
+            wall_clock = mock.MockWallClock()
+
     renderer = render.QtRenderer(args.screen, args.screen_index, glasses.display_size, pump=False)
     app = PointViewApp(
         glasses,
@@ -139,6 +178,7 @@ def run(args: argparse.Namespace) -> RunStats:
         landmark_layer=landmark_layer,
         look=args.look,
         passthrough=args.passthrough,
+        wall_clock=wall_clock,
     )
 
     glasses.start()
@@ -148,7 +188,8 @@ def run(args: argparse.Namespace) -> RunStats:
     if args.mock:
         from pointview import mock
 
-        fake = mock.FakePhoneThread(f"ws://127.0.0.1:{phone.port}")
+        tour = mock.aircraft_tour() if args.mock_tour == "aircraft" else mock.landmark_tour()
+        fake = mock.FakePhoneThread(f"ws://127.0.0.1:{phone.port}", tour)
         fake.start()
 
     shots = args.screenshot_dir

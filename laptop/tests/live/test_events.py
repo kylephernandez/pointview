@@ -661,3 +661,17 @@ def test_vessels_update_is_fast():
         assert statistics.median(times) < 0.005
     finally:
         layer.close()
+
+
+def test_failed_detail_is_not_retried_every_frame(tmp_path):
+    counts: dict = {}
+    layer = EventLayer(tmp_path / "c.sqlite", client=feed_client(counts, detail_status=404))
+    try:
+        loaded(layer, ctx())
+        focus = f"quake:{QUAKE_ID}"
+        for _ in range(60):  # one second of frames focused on a quake whose detail 404s
+            layer.update(ctx(focus=focus))
+            time.sleep(0.01)
+        assert counts.get("detail", 0) == 1
+    finally:
+        layer.close()

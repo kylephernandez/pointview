@@ -49,9 +49,7 @@ log = logging.getLogger(__name__)
 
 ADSBLOL_ATTRIBUTION = "adsb.lol · ODbL 1.0"
 OPENSKY_ATTRIBUTION = "OpenSky Network"
-USER_AGENT = (
-    "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/pointview)"
-)
+USER_AGENT = "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/kylephernandez/pointview)"
 ADSBLOL_POINT_URL = "https://api.adsb.lol/v2/point/{lat:.4f}/{lon:.4f}/{radius_nm}"
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
 ROUTE_URL = "https://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json"

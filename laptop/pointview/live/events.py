@@ -48,6 +48,8 @@ AISSTREAM_ATTRIBUTION = "Vessels: AISStream.io (not for navigation)"
 USER_AGENT = "PointView/0.1 (open-source AR labels for VITURE glasses)"
 
 USGS_FEED_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
+#: Wait this long before retrying a quake detail that failed.
+DETAIL_RETRY_S = 300.0
 USGS_DETAIL_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{id}.geojson"
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 
@@ -262,6 +264,8 @@ class EventLayer:
         self._quakes: tuple[_Quake, ...] = ()
         self._details: dict[str, dict[str, str]] = {}
         self._detail_pending: set[str] = set()
+        #: quake id → monotonic time before which a failed detail fetch is not retried.
+        self._detail_retry_at: dict[str, float] = {}
         self._detail_want: str | None = None
         self.feed_requests = 0
         self.detail_requests = 0
@@ -406,6 +410,8 @@ class EventLayer:
             self._detail_want = None
             if qid is None or qid in self._details or qid in self._detail_pending:
                 return
+            if time.monotonic() < self._detail_retry_at.get(qid, 0.0):
+                return  # failed recently: don't hammer USGS every frame
             self._detail_pending.add(qid)
         cached = self._cache.get_detail(qid)
         try:
@@ -421,7 +427,9 @@ class EventLayer:
                 self._details[qid] = meta
         except (httpx.HTTPError, ValueError) as e:
             self.last_error = f"detail: {e}"
-            log.warning("USGS detail %s failed (%s)", qid, e)
+            log.warning("USGS detail %s failed (%s); retry in %.0f s", qid, e, DETAIL_RETRY_S)
+            with self._lock:
+                self._detail_retry_at[qid] = time.monotonic() + DETAIL_RETRY_S
             if cached:  # stale beats nothing
                 with self._lock:
                     self._details[qid] = parse_usgs_detail(cached[1])

@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 
 HERE = Path(__file__).parent
-UA = "PointView/0.1 (fixture recorder; open-source AR labels; https://github.com/pointview)"
+UA = "PointView/0.1 (fixture recorder; open-source AR labels; https://github.com/kylephernandez/pointview)"
 LAT, LON, RADIUS_NM = 40.64, -73.78, 25  # near JFK: lots of traffic, ~46 km radius
 
 

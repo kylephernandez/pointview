@@ -45,9 +45,7 @@ log = logging.getLogger(__name__)
 
 CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php"
 CELESTRAK_ATTRIBUTION = "Orbital elements: CelesTrak"
-USER_AGENT = (
-    "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/pointview)"
-)
+USER_AGENT = "PointView/0.1 (open-source AR labels for VITURE glasses; https://github.com/kylephernandez/pointview)"
 
 #: CelesTrak group -> entity class (God's Eye View ``GROUP_CLASS``). Unknown groups -> "visual".
 GROUP_CLASS: dict[str, str] = {
