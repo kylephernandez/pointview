@@ -30,11 +30,6 @@ NOW = POINT["now"] / 1000.0 + 0.5  # the "wall clock" right after the recorded p
 FOV = (40.0, 25.0)
 
 
-@pytest.fixture(autouse=True)
-def _ref_world(monkeypatch):
-    _world_ref.install(monkeypatch)
-
-
 # ------------------------------------------------------------------------------------ helpers
 
 

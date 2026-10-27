@@ -42,11 +42,6 @@ FOV = (46.0, 27.0)
 ISS = 25544
 
 
-@pytest.fixture(autouse=True)
-def _world_ref(monkeypatch):
-    _world_ref_sat.install(monkeypatch)
-
-
 # ----------------------------------------------------------------------------------- helpers
 
 
