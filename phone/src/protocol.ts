@@ -15,7 +15,8 @@ export type LayerName =
   | 'aircraft'
   | 'satellites'
   | 'vessels'
-  | 'events';
+  | 'events'
+  | 'mesh';
 export const LAYER_NAMES: readonly LayerName[] = [
   'people',
   'vehicles',
@@ -24,10 +25,14 @@ export const LAYER_NAMES: readonly LayerName[] = [
   'satellites',
   'vessels',
   'events',
+  'mesh',
 ];
 /** God's Eye View sensor looks, applied in the glasses (the phone only chooses). */
 export type Look = 'normal' | 'crt' | 'nvg' | 'flir' | 'noir' | 'snow';
 export const LOOKS: readonly Look[] = ['normal', 'crt', 'nvg', 'flir', 'noir', 'snow'];
+/** How tracked objects are drawn in the glasses. */
+export type MarkerShape = 'point' | 'square';
+export const MARKER_SHAPES: readonly MarkerShape[] = ['square', 'point'];
 export type Layers = Partial<Record<LayerName, boolean>>;
 
 /** One phone → laptop sample. Field meanings and units: docs/phone-protocol.md. */
@@ -53,6 +58,8 @@ export interface PhoneMessage {
   look?: Look;
   /** Show the VITURE camera image behind the overlay; omitted = unchanged. */
   passthrough?: boolean;
+  /** Tracked-object style; omitted = unchanged. */
+  marker?: MarkerShape;
 }
 
 export type HapticStyle = 'snap' | 'select' | 'align_ok' | 'error';
@@ -67,4 +74,5 @@ export type LaptopMessage =
       message?: string;
       look?: Look;
       passthrough?: boolean;
+      marker?: MarkerShape;
     };

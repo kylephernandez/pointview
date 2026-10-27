@@ -127,6 +127,10 @@
         },
         "events": {
           "type": "boolean"
+        },
+        "mesh": {
+          "type": "boolean",
+          "description": "Sparse world mesh (God's Eye View style)."
         }
       }
     },
@@ -144,6 +148,13 @@
     "passthrough": {
       "type": "boolean",
       "description": "Optional: show the VITURE camera image behind the overlay. Omitted = unchanged (false at start)."
+    },
+    "marker": {
+      "enum": [
+        "point",
+        "square"
+      ],
+      "description": "Optional: how tracked objects are drawn. Omitted = unchanged (\"square\" at start)."
     }
   }
 }

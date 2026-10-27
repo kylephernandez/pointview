@@ -53,7 +53,8 @@ def test_v2_phone_fields(phone_messages):
     good = phone_messages[1]
     assert v.is_valid({**good, "look": "nvg", "passthrough": True, "layers": {"aircraft": False}})
     assert not v.is_valid({**good, "look": "sepia"})
-    assert set(interfaces.LAYER_KINDS) == set(
+    assert {*interfaces.LAYER_KINDS, *interfaces.EXTRA_TOGGLES} == set(
         load("phone_message")["properties"]["layers"]["properties"]
     )
+    assert v.is_valid({**good, "marker": "point", "layers": {"mesh": False}})
     assert interfaces.PhoneState.__dataclass_fields__["look"].default == "normal"

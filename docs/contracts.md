@@ -237,3 +237,30 @@ Five functions are added; their signatures are frozen and W7 implements the bodi
 * `sun_direction`
 
 See the docstrings in `laptop/pointview/world.py`.
+
+## 11. Contract v2.1: world mesh and tracked-object markers
+
+* **What it's for:** walking around, you see a **sparse wireframe of the whole world**, meaning building outlines and a coarse terrain grid. It comes from the most recent 3D model available, in the style of God's Eye View's globe. Tracked objects are drawn on top as a **point or a square**: detections, aircraft, satellites, vessels, events. The mesh is everywhere; live data still only shows where the glasses look (§7).
+* **`WorldMesh`** (in `interfaces.py`):
+  * `vertices` are local ENU meters at `origin`; `edges` index vertex pairs.
+  * The mesh is sparse. Typical sizes are 5k–50k edges within ~800 m.
+* **`MeshSource`** (`pointview/mesh/`):
+  * `mesh_near(lat, lon)` never blocks. It returns the most recent mesh, cached or fresh, and refetches on its own thread after the user moves about 200 m.
+  * `ground_alt_m(lat, lon)` gives terrain height.
+  * The default source combines:
+    * **OSM buildings.** Fetched with Overpass `way["building"](around:…); out geom;`. Each building is extruded: the bottom is `min_height` (or 0) above terrain, the top is `height`, `building:levels`×3 m, or 6 m otherwise. Each extruded building contributes footprint edges, roof edges, and vertical edges at its corners.
+    * **Terrain.** A grid built from AWS Terrain Tiles (Terrarium PNG, `s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`, no key). Lines are ~40 m apart near the user and sparser farther out.
+  * It caches the last model on disk, so offline you still get the most recent one.
+  * Attribution: "© OpenStreetMap contributors" and the terrain sources (Mapzen/AWS).
+  * Google Photorealistic 3D Tiles (what God's Eye View uses) can be added later as another `MeshSource` with the user's own API key.
+* **`world.project_mesh(...)`** (vectorized numpy):
+  * Input: the mesh, the observer's geodetic position (eye height = terrain + `world.EYE_HEIGHT_M`), and the head pose.
+  * Output: display-pixel segments clipped to the near plane and the screen, plus the distance of each segment, used for fade.
+  * `world.enu_from_geodetic` handles the coordinate change.
+* **Draw items:**
+  * `WireMesh(segments, color, alpha, width_px)` is drawn right after `Backdrop`: thin, dim, and fading with distance.
+  * `Marker(x, y, shape, color, size, label, highlighted)` draws a tracked object as a point or a square. The label is short, e.g. "UAL123 · 14 km", and is shown in full only for the snapped object.
+* **Phone:** new toggle `layers.mesh` and new field `marker` (`"point"` | `"square"`, default `"square"`). Both are additive; an omitted value means unchanged.
+* **Accuracy caveat:** the phone's GPS is good to ~5 m. Far geometry lines up well; geometry within ~30 m can be off by several degrees. Two things will improve it later:
+  * 6DoF VIO for walking smoothness;
+  * a "nudge" alignment, using a long-press on a building corner.

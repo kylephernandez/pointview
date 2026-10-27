@@ -67,6 +67,12 @@
         },
         "passthrough": {
           "type": "boolean"
+        },
+        "marker": {
+          "enum": [
+            "point",
+            "square"
+          ]
         }
       }
     }

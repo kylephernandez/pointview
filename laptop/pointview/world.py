@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from pointview.entities import Entity
-from pointview.interfaces import Alignment, CameraIntrinsics, Quat, Vec3
+from pointview.interfaces import Alignment, CameraIntrinsics, Quat, Vec3, WorldMesh
 
 SNAP_RADIUS_DEG = 5.0
 SNAP_HYSTERESIS_DEG = 2.0
@@ -613,3 +613,39 @@ def sun_direction(unix_time: float, lat: float, lon: float) -> tuple[float, floa
     north = math.sin(dec) * math.cos(phi) - math.cos(dec) * math.cos(ha) * math.sin(phi)
     up = math.sin(dec) * math.sin(phi) + math.cos(dec) * math.cos(ha) * math.cos(phi)
     return yaw_pitch_from_vector((east, north, up))
+
+
+# ----------------------------------------------------------------------- v2.1: world mesh projection
+# Signatures frozen in contract v2.1 (docs/contracts.md §11).
+
+#: Eye height above the terrain, meters.
+EYE_HEIGHT_M = 1.6
+
+
+def enu_from_geodetic(
+    origin_lat: float, origin_lon: float, origin_alt_m: float, lat, lon, alt_m
+) -> np.ndarray:
+    """WGS84 points → local ENU meters at the origin. ``lat``/``lon``/``alt_m`` may be scalars or
+    numpy arrays of equal shape; returns float64 (..., 3)."""
+    raise NotImplementedError
+
+
+def project_mesh(
+    mesh: WorldMesh,
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt_m: float,
+    head_quat: Quat,
+    north_offset_deg: float,
+    display_size: tuple[int, int],
+    display_fov_deg: tuple[float, float],
+    max_range_m: float = 800.0,
+    near_m: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project the mesh's edges for the current head pose (vectorized; ≤ 4 ms for 50k edges).
+
+    Returns (segments float32 (K, 4) in display px, clipped to the near plane and the display
+    rectangle; distance float32 (K,) meters from the observer to each segment's midpoint). Edges
+    entirely beyond ``max_range_m`` or behind the viewer are dropped. Uses the same display model
+    as project_to_display (x = W/2 + f·h.x/h.y, y = H/2 − f·h.z/h.y)."""
+    raise NotImplementedError

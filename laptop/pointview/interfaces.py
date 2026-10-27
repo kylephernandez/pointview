@@ -28,7 +28,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 
-from pointview.entities import Entity, EntityKind
+from pointview.entities import Entity, EntityKind, GeoPos
 
 Quat = tuple[float, float, float, float]
 Vec3 = tuple[float, float, float]
@@ -160,7 +160,7 @@ class Alignment:
 
 ButtonName = Literal["info", "align", "align_long"]
 LayerName = Literal[
-    "people", "vehicles", "landmarks", "aircraft", "satellites", "vessels", "events"
+    "people", "vehicles", "landmarks", "aircraft", "satellites", "vessels", "events", "mesh"
 ]
 #: Phone layer toggle → entity kind.
 LAYER_KINDS: dict[str, EntityKind] = {
@@ -172,6 +172,8 @@ LAYER_KINDS: dict[str, EntityKind] = {
     "vessels": "vessel",
     "events": "event",
 }
+#: Phone toggles that are not entity kinds.
+EXTRA_TOGGLES: tuple[str, ...] = ("mesh",)
 #: God's Eye View sensor looks (contracts §8). "normal" = no post-processing.
 Look = Literal["normal", "crt", "nvg", "flir", "noir", "snow"]
 LOOKS: tuple[Look, ...] = ("normal", "crt", "nvg", "flir", "noir", "snow")
@@ -210,7 +212,11 @@ class PhoneState:
     #: Buttons pressed since the previous message, in press order.
     buttons: tuple[ButtonName, ...] = ()
     #: Layer toggles as last reported by the phone.
-    layers: dict[LayerName, bool] = field(default_factory=lambda: dict.fromkeys(LAYER_KINDS, True))
+    layers: dict[LayerName, bool] = field(
+        default_factory=lambda: dict.fromkeys((*LAYER_KINDS, *EXTRA_TOGGLES), True)
+    )
+    #: How tracked objects are drawn.
+    marker: MarkerShape = "square"
     #: Sensor look chosen on the phone (persists when a message omits it).
     look: Look = "normal"
     #: Show the camera image behind the overlay (needed for looks to be visible).
@@ -290,6 +296,44 @@ class Layer(Protocol):
     name: str
 
     def update(self, ctx: LayerContext) -> list[Entity]: ...
+
+    def close(self) -> None: ...
+
+
+# ------------------------------------------------------------------------------------ world mesh
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class WorldMesh:
+    """A sparse 3D model of the surroundings (contracts §11).
+
+    Vertices are local East-North-Up meters relative to ``origin`` (ENU at the origin's ellipsoid
+    height). ``edges`` index pairs of vertices. Built from the most recent model available (network
+    or disk cache) and kept until a newer one replaces it."""
+
+    origin: GeoPos
+    vertices: np.ndarray  # float32 (N, 3) east, north, up
+    edges: np.ndarray  # int32 (M, 2)
+    #: e.g. "osm-buildings+terrarium", for attribution and the status corner.
+    source: str
+    #: Unix time the underlying data was fetched.
+    fetched_at: float
+    attribution: str = ""
+
+
+@runtime_checkable
+class MeshSource(Protocol):
+    """Provides the WorldMesh around the user. Never blocks: fetches on its own thread."""
+
+    def mesh_near(self, lat: float, lon: float) -> WorldMesh | None:
+        """The most recent mesh covering this position (cached or fresh), or None if none yet.
+        Calling it also tells the source where the user is (it refetches after moving ~200 m)."""
+        ...
+
+    def ground_alt_m(self, lat: float, lon: float) -> float | None:
+        """Terrain height (ellipsoidal, m) at this position, if known. Eye height is added by the
+        caller."""
+        ...
 
     def close(self) -> None: ...
 
@@ -432,8 +476,40 @@ class Backdrop:
     gain: float = 1.0
 
 
+MarkerShape = Literal["point", "square"]
+
+
+@dataclass(frozen=True, slots=True)
+class Marker:
+    """A tracked object drawn as a point or a square (God's Eye View detection overlay style).
+    (x, y) is the center; ``label`` is drawn next to it when given."""
+
+    x: float
+    y: float
+    shape: MarkerShape
+    color: Color
+    size: float = 14.0
+    label: str | None = None
+    highlighted: bool = False
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class WireMesh:
+    """Sparse world wireframe in display pixels, drawn right after the Backdrop.
+
+    ``segments`` is float32 (N, 4): x0, y0, x1, y1, already clipped to the display.
+    ``alpha`` is float32 (N,) 0..1 per segment (distance fade), or None for uniform."""
+
+    segments: np.ndarray
+    color: Color
+    alpha: np.ndarray | None = None
+    width_px: float = 1.0
+
+
 DrawItem = (
     Backdrop
+    | WireMesh
+    | Marker
     | Brackets
     | Tag
     | LandmarkLabel

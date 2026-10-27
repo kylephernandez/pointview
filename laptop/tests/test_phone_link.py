@@ -11,7 +11,7 @@ import pytest
 from test_fake_phone import fp
 from websockets.asyncio.client import connect
 
-from pointview.interfaces import LAYER_KINDS, PhoneLinkAPI
+from pointview.interfaces import EXTRA_TOGGLES, LAYER_KINDS, PhoneLinkAPI
 from pointview.phone_link import PhoneLink, PhoneLinkThread
 
 
@@ -219,7 +219,7 @@ async def test_layers_persist_when_omitted(link, url):
 
 
 def layers(**off: bool) -> dict:
-    return {**dict.fromkeys(LAYER_KINDS, True), **off}
+    return {**dict.fromkeys((*LAYER_KINDS, *EXTRA_TOGGLES), True), **off}
 
 
 async def test_look_and_passthrough_persist_when_omitted(link, url):

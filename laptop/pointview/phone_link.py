@@ -45,12 +45,14 @@ from websockets.exceptions import ConnectionClosed
 
 from pointview import schemas
 from pointview.interfaces import (
+    EXTRA_TOGGLES,
     LAYER_KINDS,
     ButtonEvent,
     ButtonName,
     Clock,
     LayerName,
     Look,
+    MarkerShape,
     PhoneState,
     Quat,
     now,
@@ -134,7 +136,8 @@ class PhoneLink:
         self._latest: PhoneState | None = None
         self._history: deque[PhoneState] = deque()
         self._buttons: deque[ButtonEvent] = deque(maxlen=_MAX_PENDING_BUTTONS)
-        self._layers: dict[LayerName, bool] = dict.fromkeys(LAYER_KINDS, True)
+        self._layers: dict[LayerName, bool] = dict.fromkeys((*LAYER_KINDS, *EXTRA_TOGGLES), True)
+        self._marker: MarkerShape = "square"
         self._look: Look = "normal"
         self._passthrough = False
         self._offsets: deque[tuple[float, float]] = deque()
@@ -237,6 +240,7 @@ class PhoneLink:
                 self._layers.update(msg["layers"])
             self._look = msg.get("look", self._look)
             self._passthrough = msg.get("passthrough", self._passthrough)
+            self._marker = msg.get("marker", self._marker)
             buttons: tuple[ButtonName, ...] = tuple(msg["buttons"])
             state = PhoneState(
                 t_ms=float(msg["t_ms"]),
@@ -253,6 +257,7 @@ class PhoneLink:
                 layers=dict(self._layers),
                 look=self._look,
                 passthrough=self._passthrough,
+                marker=self._marker,
             )
             for name in buttons:
                 self._buttons.append(ButtonEvent(name=name, t_ms=state.t_ms, t=t))
