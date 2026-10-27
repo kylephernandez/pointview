@@ -19,6 +19,7 @@ from pointview.interfaces import (
     Frame,
     InfoCard,
     PhoneState,
+    WireMesh,
 )
 from pointview.interfaces import Pose as _Pose
 
@@ -318,3 +319,58 @@ def test_no_backdrop_without_passthrough():
     app = PointViewApp(FramedGlasses(0.0), [], phone, None, clock=clock)
     phone.point(0.0)
     assert not any(isinstance(i, Backdrop) for i in app.tick())
+
+
+# ------------------------------------------------------------------------------ v2.1: world mesh
+
+
+class GridMeshSource:
+    """A flat 20 m grid of lines around the origin, standing in for the OSM/terrain source."""
+
+    def __init__(self) -> None:
+        from pointview.entities import GeoPos
+        from pointview.interfaces import WorldMesh
+
+        xs = np.arange(-200, 201, 20, dtype=np.float32)
+        verts, edges = [], []
+        for x in xs:
+            for a, b in (((x, -200), (x, 200)), ((-200, x), (200, x))):
+                i = len(verts)
+                verts += [(*a, 0.0), (*b, 0.0)]
+                edges.append((i, i + 1))
+        self.mesh = WorldMesh(
+            GeoPos(37.8, -122.4, 0.0),
+            np.array(verts, np.float32),
+            np.array(edges, np.int32),
+            "test-grid",
+            0.0,
+        )
+        self.calls = 0
+
+    def mesh_near(self, lat, lon):
+        self.calls += 1
+        return self.mesh
+
+    def ground_alt_m(self, lat, lon):
+        return 0.0
+
+    def close(self) -> None: ...
+
+
+def test_world_mesh_after_align_with_markers_on_top(rig):
+    app, phone, _, clock = rig
+    app.mesh_source = GridMeshSource()
+    level = FakeGlasses(HEAD_YAW)
+    level.quat = world.quat_from_yaw_pitch_roll(HEAD_YAW, -5.0)  # ground grid out to the horizon
+    app.glasses = level
+    phone.point(0.0, heading=90.0)
+    assert not any(isinstance(i, WireMesh) for i in app.tick())  # not aligned yet: no mesh
+    phone.press("align")
+    clock.t += 0.05
+    items = app.tick()
+    mesh = next(i for i in items if isinstance(i, WireMesh))
+    assert len(mesh.segments) > 10 and mesh.alpha is not None
+    assert items.index(mesh) == 0  # under everything
+    assert app.stats.mesh_segments_max == len(mesh.segments)
+    phone.state = replace(phone.state, layers={**phone.state.layers, "mesh": False})
+    assert not any(isinstance(i, WireMesh) for i in app.tick())  # toggled off on the phone

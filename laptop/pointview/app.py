@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+import numpy as np
+
 from pointview import landmarks, world
 from pointview.entities import LIVE_KINDS, Entity
 from pointview.interfaces import (
@@ -28,16 +30,23 @@ from pointview.interfaces import (
     Layer,
     LayerContext,
     Look,
+    MeshSource,
     PhoneState,
     Renderer,
     TrackingCameraSource,
     View,
+    WireMesh,
     now,
 )
 from pointview.scene import InfoContent, SceneInput, Status, build_scene, info_for
 
 log = logging.getLogger(__name__)
 
+#: World mesh: how far it is drawn, how many edges at most (nearest kept), its look.
+MESH_RANGE_M = 800.0
+MESH_MAX_SEGMENTS = 8000
+MESH_COLOR = (0, 190, 220)
+MESH_ALPHA = 0.55
 #: Live entities this far outside the display still count as "in view" (labels don't pop).
 VIEW_MARGIN_DEG = 5.0
 STATUS_PERIOD_S = 0.5
@@ -69,6 +78,7 @@ class RunStats:
     buttons: list[str] = field(default_factory=list)
     fps: float = 0.0
     detections_per_s: float = 0.0
+    mesh_segments_max: int = 0
 
 
 class PointViewApp:
@@ -86,6 +96,7 @@ class PointViewApp:
         render_latency_s: float = 0.0,
         look: Look = "normal",
         passthrough: bool = False,
+        mesh_source: MeshSource | None = None,
     ) -> None:
         self.glasses = glasses
         self.layers = list(layers)
@@ -99,6 +110,7 @@ class PointViewApp:
         #: Used until the phone reports its own choice.
         self.default_look: Look = look
         self.default_passthrough = passthrough
+        self.mesh_source = mesh_source
         self.look: Look | None = None
         self.alignment = Alignment()
         self.snapped_id: str | None = None
@@ -220,6 +232,36 @@ class PointViewApp:
         )
         return Backdrop(frame.bgr, h)
 
+    def _mesh(self, phone: PhoneState | None, head_quat) -> WireMesh | None:
+        """The sparse world mesh for this frame (contracts §11). Needs a GPS fix and an Align
+        (without true north the wireframe would be rotated)."""
+        if self.mesh_source is None or phone is None or phone.lat is None or phone.lon is None:
+            return None
+        if not phone.layers.get("mesh", True) or self.alignment.aligned_at is None:
+            return None
+        mesh = self.mesh_source.mesh_near(phone.lat, phone.lon)
+        if mesh is None:
+            return None
+        ground = self.mesh_source.ground_alt_m(phone.lat, phone.lon)
+        eye_alt = (ground if ground is not None else mesh.origin.alt_m) + world.EYE_HEIGHT_M
+        seg, dist = world.project_mesh(
+            mesh,
+            phone.lat,
+            phone.lon,
+            eye_alt,
+            head_quat,
+            self.alignment.north_offset_deg,
+            self.glasses.display_size,
+            self.glasses.display_fov_deg,
+            max_range_m=MESH_RANGE_M,
+        )
+        if len(seg) > MESH_MAX_SEGMENTS:
+            keep = np.argpartition(dist, MESH_MAX_SEGMENTS)[:MESH_MAX_SEGMENTS]
+            seg, dist = seg[keep], dist[keep]
+        alpha = np.clip(1.0 - dist / MESH_RANGE_M, 0.15, 1.0) * MESH_ALPHA
+        self.stats.mesh_segments_max = max(self.stats.mesh_segments_max, len(seg))
+        return WireMesh(seg, MESH_COLOR, alpha.astype(np.float32))
+
     def tick(self) -> list[DrawItem]:
         t = self.clock()
         pose = self.glasses.pose_at(t + self.render_latency_s)
@@ -298,6 +340,8 @@ class PointViewApp:
                 snapped_id=self.snapped_id,
                 info=info,
                 show_crosshair=self.alignment.aligned_at is None,
+                marker_shape=phone.marker if phone is not None else "square",
+                mesh=self._mesh(phone, head_quat) if pose is not None else None,
                 attribution=landmarks.OSM_ATTRIBUTION,
             )
         )
