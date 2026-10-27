@@ -1,0 +1,53 @@
+{
+ "type": "standard",
+ "title": "Golden Gate Bridge",
+ "displaytitle": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Golden Gate Bridge</span></span>",
+ "namespace": {
+  "id": 0,
+  "text": ""
+ },
+ "wikibase_item": "Q44440",
+ "titles": {
+  "canonical": "Golden_Gate_Bridge",
+  "normalized": "Golden Gate Bridge",
+  "display": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Golden Gate Bridge</span></span>"
+ },
+ "pageid": 12103,
+ "thumbnail": {
+  "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bf/Golden_Gate_Bridge_as_seen_from_Battery_East.jpg/330px-Golden_Gate_Bridge_as_seen_from_Battery_East.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+  "width": 330,
+  "height": 206
+ },
+ "originalimage": {
+  "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bf/Golden_Gate_Bridge_as_seen_from_Battery_East.jpg/3840px-Golden_Gate_Bridge_as_seen_from_Battery_East.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+  "width": 5388,
+  "height": 3368
+ },
+ "lang": "en",
+ "dir": "ltr",
+ "revision": "1373898858",
+ "tid": "b67ea373-aba2-11f1-b75d-dc041ce3a209",
+ "timestamp": "2026-09-08T16:31:16Z",
+ "description": "Bridge in the San Francisco Bay Area",
+ "description_source": "local",
+ "coordinates": {
+  "lat": 37.81972222,
+  "lon": -122.47861111
+ },
+ "content_urls": {
+  "desktop": {
+   "page": "https://en.wikipedia.org/wiki/Golden_Gate_Bridge",
+   "revisions": "https://en.wikipedia.org/wiki/Golden_Gate_Bridge?action=history",
+   "edit": "https://en.wikipedia.org/wiki/Golden_Gate_Bridge?action=edit",
+   "talk": "https://en.wikipedia.org/wiki/Talk:Golden_Gate_Bridge"
+  },
+  "mobile": {
+   "page": "https://en.wikipedia.org/wiki/Golden_Gate_Bridge",
+   "revisions": "https://en.wikipedia.org/wiki/Special:History/Golden_Gate_Bridge",
+   "edit": "https://en.wikipedia.org/wiki/Golden_Gate_Bridge?action=edit",
+   "talk": "https://en.wikipedia.org/wiki/Talk:Golden_Gate_Bridge"
+  }
+ },
+ "extract": "The Golden Gate Bridge is a suspension bridge spanning the Golden Gate, the one-mile-wide (1.6 km) strait connecting San Francisco Bay and the Pacific Ocean in California, United States. The structure links San Francisco—the northern tip of the San Francisco Peninsula—to Marin County, carrying both U.S. Route 101 and California State Route 1 across the strait. It also carries pedestrian and bicycle traffic, and is designated as part of U.S. Bicycle Route 95. Recognized by the American Society of Civil Engineers as one of the Wonders of the Modern World, the bridge is one of the most internationally recognized symbols of San Francisco and California.",
+ "extract_html": "<p>The <b>Golden Gate Bridge</b> is a suspension bridge spanning the Golden Gate, the one-mile-wide (1.6 km) strait connecting San Francisco Bay and the Pacific Ocean in California, United States. The structure links San Francisco—the northern tip of the San Francisco Peninsula—to Marin County, carrying both U.S. Route 101 and California State Route 1 across the strait. It also carries pedestrian and bicycle traffic, and is designated as part of U.S. Bicycle Route 95. Recognized by the American Society of Civil Engineers as one of the Wonders of the Modern World, the bridge is one of the most internationally recognized symbols of San Francisco and California.</p>"
+}

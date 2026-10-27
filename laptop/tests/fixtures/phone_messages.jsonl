@@ -1,0 +1,5 @@
+{"v": 1, "t_ms": 1793050000000, "quat": [1, 0, 0, 0], "omega": [0, 0, 0], "heading_deg": null, "heading_acc": null, "lat": null, "lon": null, "gps_acc": null, "buttons": []}
+{"v": 1, "t_ms": 1793050000016, "quat": [0.9961947, 0, 0, -0.0871557], "omega": [0, 0, -0.5], "heading_deg": 10.0, "heading_acc": 12.5, "lat": 37.8078, "lon": -122.4750, "gps_acc": 8.0, "buttons": []}
+{"v": 1, "t_ms": 1793050000033, "quat": [0.9961947, 0, 0, -0.0871557], "omega": [0, 0, 0], "heading_deg": 10.0, "heading_acc": 12.5, "lat": 37.8078, "lon": -122.4750, "gps_acc": 8.0, "buttons": ["align"]}
+{"v": 1, "t_ms": 1793050000050, "quat": [0.9961947, 0, 0, -0.0871557], "omega": [0, 0, 0], "heading_deg": 10.0, "heading_acc": 12.5, "lat": 37.8078, "lon": -122.4750, "gps_acc": 8.0, "buttons": ["info"], "layers": {"people": false}}
+{"v": 1, "t_ms": 1793050000066, "quat": [0.9659258, 0.2588190, 0, 0], "omega": [0.1, 0.2, 0.3], "heading_deg": 359.9, "heading_acc": 5, "lat": -33.8568, "lon": 151.2153, "gps_acc": 4.2, "buttons": ["align_long", "info"], "layers": {"people": true, "vehicles": true, "landmarks": false}}
