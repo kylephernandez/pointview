@@ -190,6 +190,7 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar style="light" />
       <View style={styles.top}>
+        <Text style={styles.build}>{`PointView phone · build ${APP_BUILD}`}</Text>
         <Pressable onPress={() => setManualOpen((o) => !o)} accessibilityLabel="Connection status">
           <Text style={[styles.linkText, connected ? styles.ok : styles.warn]}>{linkText}</Text>
         </Pressable>
@@ -325,9 +326,13 @@ export default function App() {
   );
 }
 
+/** Shown on screen so you can tell which version Expo Go loaded. Bump on every UI change. */
+const APP_BUILD = '2026-10-27b (ALIGN + SETTINGS)';
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000', paddingTop: 48, paddingBottom: 12 },
   top: { flex: 1, padding: 12, gap: 8 },
+  build: { color: '#6b7280', fontSize: 11 },
   linkText: { fontSize: 18, fontWeight: '600' },
   ok: { color: '#4ade80' },
   warn: { color: '#fbbf24' },
