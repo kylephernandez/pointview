@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 
 from pointview import world as w
@@ -145,14 +145,17 @@ def test_slerp_hand_values():
 
 
 @given(quats(), quats(), unit_s)
+@example((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 1.0, 0.0), 0.5)  # 180° apart: ambiguous midpoint
 def test_slerp_properties(a, b, s):
     r = w.quat_slerp(a, b, s)
     assert math.isclose(math.sqrt(sum(c * c for c in r)), 1.0, abs_tol=1e-9)
     assert same_rotation(w.quat_slerp(a, b, 0.0), a, 1e-9)
     assert same_rotation(w.quat_slerp(a, b, 1.0), b, 1e-9)
-    # Shortest path: neither endpoint sign matters.
+    # Shortest path: neither endpoint sign matters, except for rotations 180° apart (a·b = 0),
+    # where the two great-circle paths are equally short and the midpoint is ambiguous.
     nb = tuple(-c for c in b)
-    assert same_rotation(w.quat_slerp(a, nb, s), r, 1e-6)
+    if abs(sum(p * q for p, q in zip(a, b, strict=True))) > 1e-6:
+        assert same_rotation(w.quat_slerp(a, nb, s), r, 1e-6)
 
     # The rotation angle from a to r never exceeds the angle from a to b.
     def ang(x, y):
