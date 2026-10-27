@@ -500,3 +500,26 @@ def test_live_apis(tmp_path):
         assert s is not None and "bridge" in s.extract.lower()
     finally:
         layer.close()
+
+
+def test_failed_summary_is_not_refetched_every_frame(tmp_path):
+    """A card stays open on a landmark whose article is missing: the render loop calls summary_for
+    every frame, but the 404 is only requested once until SUMMARY_RETRY_S has passed."""
+    hits = {"wiki": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "wikipedia.org" in request.url.host:
+            hits["wiki"] += 1
+            return httpx.Response(404, json={"title": "Not found."})
+        return httpx.Response(404)
+
+    layer = landmarks.LandmarkLayer(
+        tmp_path / "c.sqlite", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    try:
+        for _ in range(60):  # one second of frames
+            assert layer.summary_for("en:Nonexistent Landmark") is None
+            time.sleep(0.01)
+        assert hits["wiki"] == 1
+    finally:
+        layer.close()

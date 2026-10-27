@@ -50,26 +50,59 @@ def solve(
     return intr, float(rms), len(obj_pts)
 
 
-def capture(camera_index: int, out: Path) -> None:
+def make_preview(cap, out: Path):
+    """A Qt window showing ``cap`` (anything with OpenCV's ``read()``). SPACE saves the current
+    full-resolution frame to ``out``, Q or Esc closes. Qt is used because PointView installs the
+    headless OpenCV, which has no cv2.imshow."""
+    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtGui import QImage, QPixmap
+    from PySide6.QtWidgets import QLabel
+
+    class CapturePreview(QLabel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.frame = None
+            self.saved = 0
+            self.setWindowTitle("calibrate: SPACE saves, Q quits")
+            self.timer = QTimer(self)
+            self.timer.timeout.connect(self.grab)
+            self.timer.start(33)
+
+        def grab(self) -> None:
+            ok, frame = cap.read()
+            if not ok:
+                return
+            self.frame = frame
+            small = cv2.cvtColor(cv2.resize(frame, None, fx=0.5, fy=0.5), cv2.COLOR_BGR2RGB)
+            h, w = small.shape[:2]
+            img = QImage(small.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+            self.setPixmap(QPixmap.fromImage(img))
+
+        def keyPressEvent(self, ev) -> None:
+            if ev.key() == Qt.Key.Key_Space and self.frame is not None:
+                cv2.imwrite(str(out / f"view_{self.saved:02d}.png"), self.frame)
+                self.saved += 1
+                print(f"saved {self.saved}", flush=True)
+            elif ev.key() in (Qt.Key.Key_Q, Qt.Key.Key_Escape):
+                self.close()
+
     out.mkdir(parents=True, exist_ok=True)
+    return CapturePreview()
+
+
+def capture(camera_index: int, out: Path) -> None:
+    from PySide6.QtWidgets import QApplication
+
     cap = cv2.VideoCapture(camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-    n = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            raise SystemExit("camera read failed")
-        cv2.imshow("calibrate: SPACE saves, q quits", cv2.resize(frame, None, fx=0.5, fy=0.5))
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(" "):
-            cv2.imwrite(str(out / f"view_{n:02d}.png"), frame)
-            n += 1
-            print(f"saved {n}")
-        elif key == ord("q"):
-            break
+    if not cap.isOpened():
+        raise SystemExit(f"cannot open camera {camera_index}")
+    app = QApplication.instance() or QApplication([])
+    view = make_preview(cap, out)
+    view.show()
+    app.exec()
     cap.release()
-    cv2.destroyAllWindows()
 
 
 def main(argv: list[str] | None = None) -> int:

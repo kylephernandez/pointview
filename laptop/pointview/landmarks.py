@@ -218,6 +218,10 @@ def parse_overpass(body: dict | str, lat: float, lon: float) -> list[_Feature]:
 # ------------------------------------------------------------------------------------- layer
 
 
+#: Wait this long before retrying a Wikipedia summary that failed (missing article or network).
+SUMMARY_RETRY_S = 300.0
+
+
 class LandmarkLayer:
     """Named OSM features around the phone, as ``landmark`` entities (contracts §3.2)."""
 
@@ -260,6 +264,8 @@ class LandmarkLayer:
         self._data_event = threading.Event()
         self._summaries: dict[str, WikiSummary | None] = {}
         self._summary_pending: set[str] = set()
+        #: tag → monotonic time before which a failed lookup (404, network) is not retried.
+        self._summary_retry_at: dict[str, float] = {}
 
     # --- Layer API
 
@@ -334,6 +340,8 @@ class LandmarkLayer:
                 return self._summaries[wikipedia_tag]
             if wikipedia_tag in self._summary_pending:
                 return None
+            if time.monotonic() < self._summary_retry_at.get(wikipedia_tag, 0.0):
+                return None  # failed recently: the render loop asks every frame, don't refetch
             self._summary_pending.add(wikipedia_tag)
         cached = self._cache.get_wiki(wikipedia_tag)
         if cached is not None:
@@ -351,6 +359,9 @@ class LandmarkLayer:
             self._summary_pending.discard(tag)
             if s is not None:
                 self._summaries[tag] = s
+                self._summary_retry_at.pop(tag, None)
+            else:
+                self._summary_retry_at[tag] = time.monotonic() + SUMMARY_RETRY_S
 
     # --- background thread
 

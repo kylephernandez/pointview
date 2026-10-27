@@ -145,3 +145,34 @@ def test_inspect_sdk_lib_verdicts():
     static = b"!<arch>\n/ \x00provider.obj/\x00xr_device_provider_create\x00"
     assert ins(static)["verdict"].startswith("static library")
     assert ins(b"MZ...")["verdict"].startswith("not a COFF")
+
+
+def test_calibration_capture_preview_saves_on_space_and_quits_on_q(tmp_path):
+    """The capture preview uses Qt (the laptop's OpenCV is headless, without cv2.imshow)."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pointview.render import ensure_app
+
+    ensure_app()
+    cal = load_tool("calibrate_camera")
+
+    class FakeCap:
+        def read(self):
+            return True, np.full((1080, 1920, 3), 90, np.uint8)
+
+    view = cal.make_preview(FakeCap(), tmp_path / "frames")
+    view.grab()
+    assert view.pixmap() is not None and view.pixmap().width() == 960
+
+    def key(k):
+        view.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, k, Qt.KeyboardModifier.NoModifier))
+
+    key(Qt.Key.Key_Space)
+    key(Qt.Key.Key_Space)
+    saved = sorted((tmp_path / "frames").glob("view_*.png"))
+    assert [p.name for p in saved] == ["view_00.png", "view_01.png"]
+    assert cv2.imread(str(saved[0])).shape == (1080, 1920, 3)
+    view.show()
+    key(Qt.Key.Key_Q)
+    assert not view.isVisible()

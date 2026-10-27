@@ -54,6 +54,8 @@ class FakePhone:
         self.clock = clock
         self.state: PhoneState | None = None
         self.queue: list[ButtonEvent] = []
+        #: Older samples, oldest first (history() appends the latest).
+        self.past: list[PhoneState] = []
         self.sent: list[dict] = []
 
     def point(self, yaw: float, heading: float | None = None, **layers) -> None:
@@ -77,6 +79,9 @@ class FakePhone:
 
     def latest(self):
         return self.state
+
+    def history(self, seconds: float = 1.0):
+        return list(self.past) + ([self.state] if self.state is not None else [])
 
     def pop_buttons(self):
         q, self.queue = self.queue, []
@@ -374,3 +379,29 @@ def test_world_mesh_after_align_with_markers_on_top(rig):
     assert app.stats.mesh_segments_max == len(mesh.segments)
     phone.state = replace(phone.state, layers={**phone.state.layers, "mesh": False})
     assert not any(isinstance(i, WireMesh) for i in app.tick())  # toggled off on the phone
+
+
+def test_align_pairs_head_and_phone_at_the_press_time():
+    """Align at t0 (phone yaw 0), but by the time the frame handles it the phone has turned 20°.
+    The calibration must use the t0 sample, not the newest one."""
+    clock = Clock()
+    phone = FakePhone(clock)
+    app = PointViewApp(FakeGlasses(HEAD_YAW), [], phone, None, clock=clock)
+    phone.point(0.0, heading=90.0)
+    phone.press("align")
+    pressed = phone.state
+    clock.t += 0.1
+    phone.point(20.0, heading=110.0)  # newer sample, hand still moving
+    phone.past = [pressed]
+    app.tick()
+    expected = world.align(
+        world.quat_from_yaw_pitch_roll(HEAD_YAW, 0.0), pressed.quat, 90.0, 5.0, 0.0
+    )
+    assert (
+        abs(world.wrap_deg_signed(app.alignment.phone_to_head_deg - expected.phone_to_head_deg))
+        < 1e-9
+    )
+    assert (
+        abs(world.wrap_deg_signed(app.alignment.north_offset_deg - expected.north_offset_deg))
+        < 1e-9
+    )

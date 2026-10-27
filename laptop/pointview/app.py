@@ -50,6 +50,8 @@ MESH_ALPHA = 0.55
 #: Live entities this far outside the display still count as "in view" (labels don't pop).
 VIEW_MARGIN_DEG = 5.0
 STATUS_PERIOD_S = 0.5
+#: How far back to look for the phone sample that matches a button press.
+PRESS_HISTORY_S = 2.0
 #: Hide the pointer when the newest phone sample is older than this.
 POINTER_TIMEOUT_S = 1.0
 
@@ -58,6 +60,7 @@ class PhoneLinkLike(Protocol):
     """The parts of phone_link.PhoneLinkThread the loop uses."""
 
     def latest(self) -> PhoneState | None: ...
+    def history(self, seconds: float = 1.0) -> list[PhoneState]: ...
     def pop_buttons(self) -> list[ButtonEvent]: ...
     def connected(self) -> bool: ...
     def stalled(self) -> bool: ...
@@ -135,8 +138,16 @@ class PointViewApp:
         q = world.predict_quat(phone.quat, phone.omega, t - phone.t)
         return world.pointer_ray(q, self.alignment)
 
+    def _phone_at(self, t: float, fallback: PhoneState) -> PhoneState:
+        """The phone sample closest to laptop time ``t`` (newer samples may have arrived since)."""
+        samples = self.phone.history(PRESS_HISTORY_S)
+        return min(samples, key=lambda s: abs(s.t - t)) if samples else fallback
+
     def _align(self, ev: ButtonEvent, phone: PhoneState) -> None:
-        pose = self.glasses.pose_at(ev.t)
+        # Head pose and phone attitude must come from the same moment: if the hand or head is still
+        # moving, any time gap between them would be baked into the calibration.
+        phone = self._phone_at(ev.t, phone)
+        pose = self.glasses.pose_at(phone.t)
         if pose is None:
             self._haptic("error")
             return
