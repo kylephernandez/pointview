@@ -7,15 +7,26 @@ are pixels, origin top-left (see interfaces.py).
 * ``render_to_image(items, size)`` and ``save_png(...)`` use exactly the same painter code as the
   window (``paint_items``).
 * ``QtRenderer`` is the borderless full-screen window (contracts §3.4).
+
+Passthrough and looks (contracts §8). A ``Backdrop`` is warped by its homography into the canvas
+and scaled by ``gain``. With the "normal" look the overlay is then painted at full display
+resolution; with any other look the backdrop and the overlay are composed at an internal
+resolution (960x540 by default), the CPU look from ``pointview.looks`` is applied to that frame,
+and the result is upscaled to the display. Labels are re-tinted per look (``tint_color``) so they
+read as part of it. With no Backdrop and the normal look, the plain full-resolution QPainter path
+is used, as before. The optional GLSL path is not implemented: ``gpu="auto"`` runs the CPU path.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+import cv2
+import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
@@ -30,8 +41,11 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
+from pointview import looks as looks_mod
 from pointview.interfaces import (
+    LOOKS,
     MIN_TEXT_PX,
+    Backdrop,
     Brackets,
     Color,
     Crosshair,
@@ -39,6 +53,7 @@ from pointview.interfaces import (
     EdgeArrow,
     InfoCard,
     LandmarkLabel,
+    Look,
     PointerRing,
     StatusCorner,
     Tag,
@@ -50,6 +65,11 @@ log = logging.getLogger(__name__)
 #: Preferred families; Qt falls back per glyph (for "✓", "±", "·").
 FONT_FAMILIES = ["Segoe UI", "Inter", "DejaVu Sans", "FreeSans", "Arial"]
 SCREEN_MARGIN = 16.0
+#: Resolution the looks run at (contracts §8); the result is upscaled to the display.
+DEFAULT_INTERNAL_SIZE = (960, 540)
+
+# Colour transform applied to every pen/brush/text colour while painting (see ``tint_color``).
+_active_tint: Callable[[Color], Color] | None = None
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -78,7 +98,39 @@ def qcolor(c: Color, mix_white: float = 0.0, mix_black: float = 0.0) -> QColor:
         r, g, b = (round(v + (255 - v) * mix_white) for v in (r, g, b))
     if mix_black:
         r, g, b = (round(v * (1 - mix_black)) for v in (r, g, b))
+    if _active_tint is not None:
+        r, g, b = _active_tint((r, g, b))
     return QColor(r, g, b)
+
+
+#: Label colour per look as a multiple of the label's own brightness (RGB, 0..1).
+_TINT_RGB: dict[str, tuple[float, float, float]] = {
+    "crt": (0.55, 1.0, 0.60),  # phosphor green
+    "nvg": (0.16, 1.0, 0.22),  # P43, the same green the NVG look uses
+    "flir": (1.0, 1.0, 1.0),  # white-hot
+    "noir": (0.95, 0.95, 0.95),
+    "snow": (0.90, 0.95, 1.0),
+}
+_IRONBOW_HOT_RGB = (1.0, 0.91, 0.32)  # ironbow near the hot end
+
+
+def tint_color(color: Color, look: Look, params: Mapping[str, float] | None = None) -> Color:
+    """Re-tint a label colour so it reads as part of ``look``. ``"normal"`` returns it unchanged.
+
+    The tint keeps the colour's brightness (never below 55 %, so labels stay legible) but replaces
+    its hue: phosphor green for CRT and NVG, white-hot for FLIR (ironbow hot yellow when the
+    palette is ironbow), grey for noir, cool white for snow.
+    """
+    if look == "normal":
+        return color
+    r, g, b = color
+    lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+    k = 0.55 + 0.45 * lum
+    if look == "flir" and float((params or {}).get("palette", 0.0)) >= 0.5:
+        mult = _IRONBOW_HOT_RGB
+    else:
+        mult = _TINT_RGB[look]
+    return (round(255 * k * mult[0]), round(255 * k * mult[1]), round(255 * k * mult[2]))
 
 
 def _pen(color: QColor, width: float) -> QPen:
@@ -190,7 +242,7 @@ def _info_card(p: QPainter, it: InfoCard, size: tuple[int, int]) -> None:
     rows: list[tuple[QFont, QFontMetrics, str, QColor]] = [
         (title_font, tfm, it.title, qcolor(it.color, mix_white=0.2))
     ]
-    rows += [(body_font, bfm, ln, QColor(235, 235, 235)) for ln in it.lines]
+    rows += [(body_font, bfm, ln, qcolor((235, 235, 235))) for ln in it.lines]
     if it.footer:
         rows.append((foot_font, ffm, it.footer, qcolor(it.color, mix_black=0.25)))
     w = max(fm.horizontalAdvance(t) for _, fm, t, _ in rows) + 2 * pad
@@ -256,6 +308,8 @@ def paint_items(p: QPainter, items: Sequence[DrawItem], size: tuple[int, int]) -
                 _status_corner(p, it)
             case Text():
                 _text(p, it)
+            case Backdrop():
+                pass  # drawn by the compositor before the overlay
             case _:
                 log.warning("unknown draw item %r", type(it).__name__)
         p.restore()
@@ -264,25 +318,137 @@ def paint_items(p: QPainter, items: Sequence[DrawItem], size: tuple[int, int]) -
 # --------------------------------------------------------------------------------- offscreen
 
 
-def render_to_image(items: Sequence[DrawItem], size: tuple[int, int] = (1920, 1080)) -> QImage:
-    """Render ``items`` on black, offscreen, with the same painter code as the window."""
-    ensure_app()
-    img = QImage(size[0], size[1], QImage.Format.Format_RGB32)
-    img.fill(QColor(0, 0, 0))
+def _internal_size(size: tuple[int, int], internal: tuple[int, int] | None) -> tuple[int, int]:
+    """Largest size with the display's aspect ratio that fits within ``internal`` pixels wide."""
+    if internal is None or size[0] <= internal[0]:
+        return size
+    return internal[0], max(1, round(size[1] * internal[0] / size[0]))
+
+
+def _warp_backdrop(bd: Backdrop, size: tuple[int, int], out: tuple[int, int]) -> np.ndarray:
+    """``bd.bgr`` warped by its image->display homography into an ``out``-sized BGR canvas
+    (``size`` is the display size the homography targets), times ``gain``. Black elsewhere."""
+    h = np.asarray(bd.homography, dtype=np.float64).reshape(3, 3)
+    scale = np.diag([out[0] / size[0], out[1] / size[1], 1.0])
+    warped = cv2.warpPerspective(
+        np.ascontiguousarray(bd.bgr),
+        scale @ h,
+        out,
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+    if bd.gain != 1.0:
+        warped = cv2.convertScaleAbs(warped, alpha=max(0.0, float(bd.gain)))
+    return warped
+
+
+def _paint_over(
+    bgr: np.ndarray,
+    items: Sequence[DrawItem],
+    size: tuple[int, int],
+    look: Look,
+    params: Mapping[str, float] | None,
+) -> np.ndarray:
+    """Paint ``items`` (display coordinates, tinted for ``look``) over a BGR canvas of any
+    resolution; returns the painted BGR canvas."""
+    global _active_tint
+    ch, cw = bgr.shape[:2]
+    buf = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA))
+    img = QImage(buf.data, cw, ch, buf.strides[0], QImage.Format.Format_RGB32)
     p = QPainter(img)
+    prev = _active_tint
+    _active_tint = (lambda c: tint_color(c, look, params)) if look != "normal" else None
     try:
+        if (cw, ch) != tuple(size):
+            p.scale(cw / size[0], ch / size[1])
         paint_items(p, items, size)
     finally:
+        _active_tint = prev
         p.end()
-    return img
+    return cv2.cvtColor(buf, cv2.COLOR_BGRA2BGR)
+
+
+def compose_frame(
+    items: Sequence[DrawItem],
+    size: tuple[int, int],
+    look: Look = "normal",
+    t_s: float = 0.0,
+    params: Mapping[str, float] | None = None,
+    internal_size: tuple[int, int] | None = DEFAULT_INTERNAL_SIZE,
+) -> np.ndarray:
+    """The whole frame as a ``size`` BGR uint8 array: backdrop, overlay, then the look."""
+    if look not in LOOKS:
+        raise ValueError(f"unknown look {look!r}; expected one of {LOOKS}")
+    ensure_app()
+    backdrop = next((it for it in reversed(items) if isinstance(it, Backdrop)), None)
+    if look == "normal":
+        # No post-processing: warp at display size so the overlay stays crisp.
+        canvas = (
+            _warp_backdrop(backdrop, size, size)
+            if backdrop is not None
+            else np.zeros((size[1], size[0], 3), np.uint8)
+        )
+        return _paint_over(canvas, items, size, "normal", None)
+    iw, ih = _internal_size(size, internal_size)
+    canvas = (
+        _warp_backdrop(backdrop, size, (iw, ih))
+        if backdrop is not None
+        else np.zeros((ih, iw, 3), np.uint8)
+    )
+    frame = _paint_over(canvas, items, size, look, params)
+    frame = looks_mod.apply_look(look, frame, t_s, params)
+    if (iw, ih) != tuple(size):
+        frame = cv2.resize(frame, size, interpolation=cv2.INTER_LINEAR)
+    return frame
+
+
+def _bgr_to_qimage(bgr: np.ndarray) -> QImage:
+    buf = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA))
+    h, w = buf.shape[:2]
+    return QImage(buf.data, w, h, buf.strides[0], QImage.Format.Format_RGB32).copy()
+
+
+def _is_plain(items: Sequence[DrawItem], look: Look) -> bool:
+    return look == "normal" and not any(isinstance(it, Backdrop) for it in items)
+
+
+def render_to_image(
+    items: Sequence[DrawItem],
+    size: tuple[int, int] = (1920, 1080),
+    look: Look = "normal",
+    t_s: float = 0.0,
+    params: Mapping[str, float] | None = None,
+    internal_size: tuple[int, int] | None = DEFAULT_INTERNAL_SIZE,
+) -> QImage:
+    """Render ``items`` on black, offscreen, with the same code as the window.
+
+    With no Backdrop and ``look="normal"`` this is the plain full-resolution QPainter path.
+    """
+    ensure_app()
+    if _is_plain(items, look):
+        img = QImage(size[0], size[1], QImage.Format.Format_RGB32)
+        img.fill(QColor(0, 0, 0))
+        p = QPainter(img)
+        try:
+            paint_items(p, items, size)
+        finally:
+            p.end()
+        return img
+    return _bgr_to_qimage(compose_frame(items, size, look, t_s, params, internal_size))
 
 
 def save_png(
-    items: Sequence[DrawItem], path: str | Path, size: tuple[int, int] = (1920, 1080)
+    items: Sequence[DrawItem],
+    path: str | Path,
+    size: tuple[int, int] = (1920, 1080),
+    look: Look = "normal",
+    t_s: float = 0.0,
+    params: Mapping[str, float] | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not render_to_image(items, size).save(str(path), "PNG"):
+    if not render_to_image(items, size, look, t_s, params).save(str(path), "PNG"):
         raise OSError(f"could not write {path}")
     return path
 
@@ -295,6 +461,10 @@ class _Canvas(QWidget):
         super().__init__()
         self.logical_size = size
         self.items: tuple[DrawItem, ...] = ()
+        self.look: Look = "normal"
+        self.look_params: dict[str, float] = {}
+        self.internal_size: tuple[int, int] | None = DEFAULT_INTERNAL_SIZE
+        self.t0 = time.monotonic()
         self.setWindowTitle("PointView")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -309,6 +479,20 @@ class _Canvas(QWidget):
     def paintEvent(self, event) -> None:  # Qt API name
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(0, 0, 0))
+        if not _is_plain(self.items, self.look):
+            frame = _bgr_to_qimage(
+                compose_frame(
+                    self.items,
+                    self.logical_size,
+                    self.look,
+                    time.monotonic() - self.t0,
+                    self.look_params,
+                    self.internal_size,
+                )
+            )
+            p.drawImage(self.rect(), frame)
+            p.end()
+            return
         lw, lh = self.logical_size
         if self.width() > 0 and self.height() > 0 and (self.width(), self.height()) != (lw, lh):
             p.scale(self.width() / lw, self.height() / lh)
@@ -354,8 +538,16 @@ class QtRenderer:
         size: tuple[int, int] = (1920, 1080),
         *,
         pump: bool = True,
+        gpu: str = "auto",
+        internal_size: tuple[int, int] | None = DEFAULT_INTERNAL_SIZE,
     ):
+        if gpu not in ("auto", "off"):
+            raise ValueError(f"gpu must be 'auto' or 'off', not {gpu!r}")
         self._app = ensure_app()
+        #: True only if a GLSL path is running. Not implemented, so always False (CPU looks).
+        self.gpu_active = False
+        if gpu == "auto":
+            log.info("GLSL look path not implemented; using the CPU looks")
         self.size = size
         self._pump = pump
         self._closed = False
@@ -364,6 +556,7 @@ class QtRenderer:
         )
         self.screen = screen
         self._canvas = _Canvas(size)
+        self._canvas.internal_size = internal_size
         if screen is not None:
             self._canvas.setScreen(screen)
             self._canvas.setGeometry(screen.geometry())
@@ -379,6 +572,17 @@ class QtRenderer:
         self._canvas.update()
         if self._pump:
             self._app.processEvents()
+
+    def set_look(self, look: Look, params: Mapping[str, float] | None = None) -> None:
+        """Apply a sensor look to everything drawn (Backdrop and overlay); see contracts §8."""
+        if look not in LOOKS:
+            raise ValueError(f"unknown look {look!r}; expected one of {LOOKS}")
+        self._canvas.look = look
+        self._canvas.look_params = dict(params or {})
+        if not self._closed:
+            self._canvas.update()
+            if self._pump:
+                self._app.processEvents()
 
     def close(self) -> None:
         if self._closed:
