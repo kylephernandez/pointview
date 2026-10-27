@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
 
@@ -49,6 +49,7 @@ export default function App() {
     attempts: 0,
   });
   const [laptop, setLaptop] = useState<LaptopStatus | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [layers, setLayers] = useState(builder.getLayers());
   const [look, setLook] = useState<Look>('normal');
   const [passthrough, setPassthrough] = useState(false);
@@ -244,58 +245,73 @@ export default function App() {
           <Text style={styles.alignHint}>hold = landmark</Text>
         </Pressable>
 
-        <View style={styles.looks}>
-          {LOOKS.map((l) => (
-            <Pressable
-              key={l}
-              style={[styles.lookBtn, look === l && styles.lookBtnOn]}
-              onPress={() => chooseLook(l)}
-              accessibilityLabel={`Look ${l}`}
-              accessibilityState={{ selected: look === l }}
-            >
-              <Text style={[styles.lookText, look === l && styles.lookTextOn]}>{l.toUpperCase()}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.ptRow}>
-          <Text style={styles.toggleText}>Passthrough (camera behind overlay)</Text>
-          <Switch value={passthrough} onValueChange={choosePassthrough} />
-        </View>
-        <Text style={styles.hint}>Looks only show over passthrough.</Text>
-        <View style={styles.ptRow}>
-          <Text style={styles.toggleText}>World mesh (wireframe of the surroundings)</Text>
-          <Switch value={layers.mesh} onValueChange={(v) => toggle('mesh', v)} />
-        </View>
-        <View style={styles.ptRow}>
-          <Text style={styles.toggleText}>Tracked objects as</Text>
-          <View style={styles.markers}>
-            {(['square', 'point'] as const).map((m) => (
-              <Pressable
-                key={m}
-                style={[styles.markerBtn, marker === m && styles.lookBtnOn]}
-                onPress={() => chooseMarker(m)}
-                accessibilityLabel={`Marker ${m}`}
-                accessibilityState={{ selected: marker === m }}
-              >
-                <Text style={[styles.lookText, marker === m && styles.lookTextOn]}>{m.toUpperCase()}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <Pressable
+          style={({ pressed }) => [styles.settingsBtn, pressed && styles.settingsBtnPressed]}
+          onPress={() => setSettingsOpen((o) => !o)}
+          accessibilityLabel="Settings: looks, passthrough, mesh, markers, layers"
+          accessibilityState={{ expanded: settingsOpen }}
+        >
+          <Text style={styles.settingsText}>{settingsOpen ? 'SETTINGS ▲' : 'SETTINGS ▼'}</Text>
+        </Pressable>
 
-        {LAYER_GROUPS.map((g) => (
-          <View key={g.title}>
-            <Text style={styles.groupTitle}>{g.title}</Text>
-            <View style={styles.toggles}>
-              {g.items.map(([name, label]) => (
-                <View key={name} style={styles.toggle}>
-                  <Text style={styles.toggleText}>{label}</Text>
-                  <Switch value={layers[name]} onValueChange={(v) => toggle(name, v)} />
-                </View>
+        {settingsOpen && (
+          <ScrollView style={styles.settings} contentContainerStyle={styles.settingsContent}>
+            <View style={styles.looks}>
+              {LOOKS.map((l) => (
+                <Pressable
+                  key={l}
+                  style={[styles.lookBtn, look === l && styles.lookBtnOn]}
+                  onPress={() => chooseLook(l)}
+                  accessibilityLabel={`Look ${l}`}
+                  accessibilityState={{ selected: look === l }}
+                >
+                  <Text style={[styles.lookText, look === l && styles.lookTextOn]}>{l.toUpperCase()}</Text>
+                </Pressable>
               ))}
             </View>
-          </View>
-        ))}
+            <View style={styles.ptRow}>
+              <Text style={styles.toggleText}>Passthrough (camera behind overlay)</Text>
+              <Switch value={passthrough} onValueChange={choosePassthrough} />
+            </View>
+            <Text style={styles.hint}>Looks only show over passthrough.</Text>
+            <View style={styles.ptRow}>
+              <Text style={styles.toggleText}>World mesh (wireframe of the surroundings)</Text>
+              <Switch value={layers.mesh} onValueChange={(v) => toggle('mesh', v)} />
+            </View>
+            <View style={styles.ptRow}>
+              <Text style={styles.toggleText}>Tracked objects as</Text>
+              <View style={styles.markers}>
+                {(['square', 'point'] as const).map((m) => (
+                  <Pressable
+                    key={m}
+                    style={[styles.markerBtn, marker === m && styles.lookBtnOn]}
+                    onPress={() => chooseMarker(m)}
+                    accessibilityLabel={`Marker ${m}`}
+                    accessibilityState={{ selected: marker === m }}
+                  >
+                    <Text style={[styles.lookText, marker === m && styles.lookTextOn]}>
+                      {m.toUpperCase()}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {LAYER_GROUPS.map((g) => (
+              <View key={g.title}>
+                <Text style={styles.groupTitle}>{g.title}</Text>
+                <View style={styles.toggles}>
+                  {g.items.map(([name, label]) => (
+                    <View key={name} style={styles.toggle}>
+                      <Text style={styles.toggleText}>{label}</Text>
+                      <Switch value={layers[name]} onValueChange={(v) => toggle(name, v)} />
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       <Pressable
@@ -335,13 +351,23 @@ const styles = StyleSheet.create({
   },
   connectText: { color: '#fff', fontWeight: '600' },
   align: {
-    flex: 1,
+    height: 110,
     backgroundColor: '#1d4ed8',
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   alignPressed: { backgroundColor: '#3b82f6' },
+  settingsBtn: {
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#1f2937',
+    alignItems: 'center',
+  },
+  settingsBtnPressed: { backgroundColor: '#374151' },
+  settingsText: { color: '#e5e7eb', fontSize: 16, fontWeight: '700' },
+  settings: { flex: 1 },
+  settingsContent: { gap: 8, paddingBottom: 8 },
   alignText: { color: '#fff', fontSize: 40, fontWeight: '800' },
   alignHint: { color: '#bfdbfe', fontSize: 14 },
   toggles: { flexDirection: 'row', justifyContent: 'space-between' },
