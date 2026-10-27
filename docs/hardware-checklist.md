@@ -212,3 +212,58 @@ Commands run from `pointview\laptop` with the venv active, unless they say other
 28. **Drift over 10 minutes.** Wear the setup for 10 minutes, looking around normally, then point at the
     step 23 object.
     *Expected:* the ring is within about 3° of it, and re-aligning takes one tap. Record the drift.
+
+## M4: God's Eye View features (world mesh, live data, looks)
+
+These come after M3. Live data and the mesh need the phone's GPS fix and an Align (with `north: compass`
+or better). All of them need internet through the hotspot.
+
+29. **World mesh.** Run `python -m pointview --screen VITURE --intrinsics intrinsics.json`, tap Align,
+    then turn on "World mesh" in the phone app.
+    *Expected:*
+    * within a few seconds, a thin cyan wireframe of the buildings around you and a sparse ground grid;
+    * buildings 100 m or more away line up within about 3°. Nearer ones may be several degrees off
+      because of GPS error (about 9° at 30 m for 5 m of GPS error);
+    * on the next start, offline, the last mesh appears immediately;
+    * the bottom right credits OpenStreetMap and the terrain sources.
+
+    Record how far off near and far buildings are, and whether the mesh distracts at walking pace.
+30. **First live Overpass building query.** Step 29 is also the first time the mesh's Overpass query
+    runs live. The tests used real OSM data converted from another API.
+    *Expected:* no `osm_buildings` errors in the log. If buildings are missing but the ground grid
+    shows, paste the log.
+31. **Aircraft.** On a clear day, near a flight path, toggle "Aircraft" on in the phone app and look
+    at a plane.
+    *Expected:*
+    * a square (or point) sits on the plane, labelled e.g. `UAL123 · 14 km`;
+    * point at it and tap Info for its type, altitude, speed and route;
+    * labels don't jump when a new update arrives (every 30 s; positions are extrapolated between).
+
+    Planes behind you get no label.
+32. **Satellites.** At night, find a visible pass (for example the ISS) on a site like Heavens-Above,
+    then look where it will appear.
+    *Expected:* the marker moves with the bright dot to within about 1–2°, and Info shows the next
+    pass. If the label trails the dot, check that the laptop clock is synced (Windows Settings → Time
+    → Sync now).
+33. **Earthquakes and ships.**
+    * Quakes from the last day within 500 km appear on the horizon in their direction, labelled
+      e.g. `M3.2 quake · 4 h ago`.
+    * Ships appear only with `AISSTREAM_API_KEY` set, near water.
+34. **Looks.** In the phone app, turn on Passthrough, then go through NORMAL, CRT, NVG, FLIR, NOIR and
+    SNOW.
+    *Expected:*
+    * the camera image fills the view, lined up with the real world;
+    * each look restyles the camera image and the mesh;
+    * markers and labels stay sharp;
+    * fps stays at 30 or more. Note the fps with each look.
+35. **NVG on the tracking cameras.** In a dark room, pick NVG with Passthrough on and compare it with
+    NORMAL.
+    *Expected:* NVG uses the side tracking cameras.
+    * Note whether they show more than the front camera in the dark, and whether IR light (a TV
+      remote or an IR illuminator) shows up.
+    * If the image is upside down, mirrored or offset, record which. The tracking cameras' FOV and
+      mounting are guesses until calibrated.
+36. **Lens tint and brightness.** Call `glasses.set_film(1.0)` and `glasses.set_brightness(2)` from a
+    Python shell, with `VitureGlasses` started.
+    *Expected:* the lenses darken and the display dims. Record which film values change anything (the
+    film may be on/off only).

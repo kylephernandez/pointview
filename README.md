@@ -6,6 +6,22 @@ A Windows laptop in a backpack reads the glasses' front camera and head tracking
 and people, looks up nearby landmarks in OpenStreetMap, and draws labels on the glasses' see-through
 display. Aim the phone's top edge at a label to select it, then tap **Info** for details.
 
+It also brings [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) to the real world:
+
+* **World mesh:** a sparse wireframe of the buildings and ground around you, from OpenStreetMap and open
+  terrain data, cached so the most recent model works offline.
+* **Live data:**
+  * aircraft (ADS-B, from adsb.lol and OpenSky);
+  * satellites (CelesTrak orbits, with visibility and next pass);
+  * earthquakes (USGS);
+  * ships (AISStream, if you have a key).
+
+  Each is drawn as a point or a square on the thing itself. Live data is only processed for what the
+  glasses are looking at, and details are fetched only for the item you point at.
+* **Sensor looks:** CRT, NVG, FLIR, noir and snow, ported from God's Eye View. They are cosmetic. They
+  restyle the passthrough camera view and the mesh; FLIR shows no real heat data. NVG uses the glasses'
+  side tracking cameras when they are available.
+
 * Spec: [docs/design.md](docs/design.md)
 * Module contracts (frames, units, APIs): [docs/contracts.md](docs/contracts.md)
 * Phone ↔ laptop protocol: [docs/phone-protocol.md](docs/phone-protocol.md)
@@ -61,14 +77,18 @@ pytest                            # same suite as CI
 
 ### VITURE SDK
 
-PointView talks to the glasses through VITURE's Glasses SDK for Windows (`libglasses.dll`), loaded with
+PointView talks to the glasses through VITURE's Glasses SDK for Windows (`glasses.dll`), loaded with
 `ctypes`. Download the SDK from the [VITURE developer site](https://www.viture.com/developer/glasses-sdk/glasses)
 (it may require registering). This repo does not ship it. Then set:
 
 ```powershell
-$env:VITURE_SDK_PATH = "C:\path\to\sdk\folder\containing\libglasses.dll"
-$env:VITURE_PRODUCT_ID = "0x...."   # Device Manager → glasses → Hardware Ids → VID_35CA&PID_xxxx
+setx VITURE_SDK_PATH "C:\path\to\the\unzipped\SDK"   # the folder with glasses.dll (subfolders are searched)
 ```
+
+The glasses' USB product ID is detected automatically. To override it, set `VITURE_PRODUCT_ID`.
+
+VITURE's docs say the Windows USB driver comes with **SpaceWalker for Windows**. Install it, then quit
+it before running PointView. Only one app can use the glasses at a time.
 
 The bindings follow VITURE's public documentation, but they have not been run against the real DLL. See
 `laptop/pointview/glasses/viture_sdk.py` for every assumption, and the hardware checklist for how to
@@ -86,8 +106,14 @@ Useful flags:
 * `--intrinsics intrinsics.json` (from `tools/calibrate_camera.py`)
 * `--camera-offset yaw,pitch` (camera-to-display offset in degrees)
 * `--camera-index N` (OpenCV camera instead of the SDK stream)
-* `--no-detection`, `--no-landmarks`
+* `--no-detection`, `--no-landmarks`, `--no-live`, `--no-mesh`
+* `--look normal|crt|nvg|flir|noir|snow` and `--passthrough`. These are the defaults until the phone
+  picks its own.
+* `--mock-tour landmarks|aircraft` (what the fake phone points at in `--mock`)
 * `--port 8765`
+
+Environment variables:
+* `AISSTREAM_API_KEY` turns on the ships layer. Get a key from [aisstream.io](https://aisstream.io).
 
 `python -m pointview --help` lists all of them.
 
@@ -137,7 +163,15 @@ Test markers:
 * Camera frames are processed in memory and dropped. They are never saved, logged or uploaded.
 * People are only ever labeled "person". There is no face recognition, no identity and no license-plate
   reading.
-* The only network calls are Overpass (your approximate position) and Wikipedia (a landmark's title).
+* The network calls send only your approximate position (or a landmark's or aircraft's name):
+  * Overpass, for landmarks and buildings;
+  * Wikipedia;
+  * AWS Terrain Tiles;
+  * adsb.lol and OpenSky;
+  * CelesTrak;
+  * USGS;
+  * AISStream, if you enabled it.
+* The phone's camera is never used. All imagery comes from the glasses and stays in memory.
 * A camera on your face in public can make people feel recorded. Follow local laws on filming.
 
 ## Licenses and attribution
@@ -165,5 +199,23 @@ Test markers:
   * NumPy (BSD-3-Clause)
   * jsonschema (MIT)
   * Expo and React Native (MIT)
-* The architecture follows [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)'s
-  layer-per-module pattern.
+* **[God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)** (MIT, © 2026 Bilawal Sidhu):
+  * the layer-per-module architecture;
+  * the sensor looks in `laptop/pointview/looks/`, ported from its GLSL;
+  * ideas and field handling in the live layers.
+
+  Each ported file carries the MIT notice.
+* **World mesh data:**
+  * buildings © OpenStreetMap contributors (ODbL);
+  * terrain from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), by Mapzen. Sources:
+    USGS 3DEP, SRTM, GMTED2010 and NOAA ETOPO1 (see the
+    [attribution requirements](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)).
+
+  Shown on the glasses whenever the mesh is drawn.
+* **Live data:**
+  * aircraft from [adsb.lol](https://www.adsb.lol/docs/open-data/api/) (ODbL), with
+    [OpenSky](https://openskynetwork.github.io/opensky-api/) as fallback (non-commercial use);
+  * satellite orbits from [CelesTrak](https://celestrak.org/);
+  * earthquakes from the [USGS](https://earthquake.usgs.gov/earthquakes/feed/) (public domain);
+  * ships from [AISStream](https://aisstream.io) (beta, key required, not for navigation).
+* **Satellite propagation:** `sgp4` (MIT).
