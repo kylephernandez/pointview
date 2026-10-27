@@ -1,0 +1,12 @@
+{
+ "recorded_unix": 1793064222.398816,
+ "adsblol_now_ms": 1793064214002,
+ "opensky_time": 1793064208,
+ "phone_lat": 40.64,
+ "phone_lon": -73.78,
+ "radius_nm": 25,
+ "route_callsigns": [
+  "UAL2066",
+  "UAL2192"
+ ]
+}
