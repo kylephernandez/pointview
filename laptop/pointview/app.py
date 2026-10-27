@@ -323,6 +323,8 @@ class PointViewApp:
                         "aligned": self.alignment.aligned_at is not None,
                         "selected": selected,
                         "fps": round(self.stats.fps, 1),
+                        "look": look,
+                        "passthrough": passthrough,
                     }
                 )
             except Exception:
