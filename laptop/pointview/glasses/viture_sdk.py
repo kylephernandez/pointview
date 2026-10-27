@@ -36,6 +36,33 @@ WHAT THE DOCS STATE (used below)
       ``{uint8_t* data; uint32_t size, width, height; XRCameraFormat format; uint64_t timestamp
       /* ns */; uint32_t sequence;}``. Camera USB id VID 0x0C45, PID 0x636B for Luma Ultra.
 
+ADDED FOR W13 (same page, "Carina Stereo Camera Callback", "Exposure Control (Carina)" and "Device Control"
+sections, re-read 2026-10-27; the last ~42k characters of the page were NOT read)
+    * Stereo callback, registered through register_callbacks_carina (the docs' example passes NULL for
+      the other three callbacks; we still pass no-ops): ``static void on_stereo(char* left0, char*
+      right0, char* left1, char* right1, double timestamp, int width, int height)``. 8-bit grayscale,
+      four buffers per frame, 25 Hz tied to camera VSync, ``width x height`` per camera (no fixed size
+      stated), "Data is valid only during this callback. Copy if needed." The XRCameraCallback typedef
+      itself was not in the text read. NOT stated: which of the pair is physically left/right, and what
+      the 0 and 1 suffixes mean (we assume left0 = left camera, newest sample; UNCONFIRMED), the row
+      stride (assumed width), the timestamp clock.
+    * Exposure: ``xr_device_provider_set_manual_exposure_carina(handle, float exposure_time_ms, int
+      exposure_gain)`` (docs example: ``(handle, 4.0f, 8)``; ranges ms [0.01, 8.0], gain [0, 15],
+      out-of-range clamped by the SDK) and ``xr_device_provider_set_auto_exposure_carina(handle)``
+      (auto is the default). Return type / codes NOT documented: we bind ``int`` and do not check it.
+      Whether the gain argument is int or float is inferred from the literal ``8``: UNCONFIRMED.
+    * Device control (all synchronous, "All functions require the provider to be in the STARTED
+      state"): ``int xr_device_provider_get_brightness_level(handle)`` (negative on failure),
+      ``int xr_device_provider_set_brightness_level(handle, int level)`` (0 on success; range [0, 8]
+      for Luma series, [0, 6] Viture One); ``xr_device_provider_get_film_mode(handle, float* voltage)``
+      (return code "not stated"; we assume int, 0 = success) and
+      ``xr_device_provider_set_film_mode(handle, float voltage)`` (voltage [0.0, 1.0]; Gen1 binary,
+      0.0 off and non-zero fully on; Gen2 Beast 8 steps; Pro 2 has none and returns NOT_SUPPORTED -4).
+      Result codes: -4 NOT_SUPPORTED, -5 NO_DATA (no ACK within 3 s; retrying is meaningful).
+      Whether the Luma Ultra film is Gen1 binary or multi-level is NOT documented.
+    * Not bound (no exact signature read): volume, ``xr_device_provider_get_value_max`` with
+      ``VITURE_VALUE_ID_*`` constants (numeric values not read).
+
 UNVERIFIED / NOT DOCUMENTED (flagged again at each use)
     * The numeric glasses USB product id of the Luma Ultra (the page lists none): it must be
       passed in (``product_id=`` or env ``VITURE_PRODUCT_ID``).
@@ -93,12 +120,14 @@ class XRCameraFrame(ctypes.Structure):
 XRPoseCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_float), ctypes.c_double)
 XRVSyncCallback = ctypes.CFUNCTYPE(None, ctypes.c_double)
 XRImuCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_float), ctypes.c_double)
+# The four image buffers are declared ``char*`` in the docs, but they are binary (NUL bytes are normal in
+# an image), so they are bound as c_void_p: c_char_p would be auto-converted to a NUL-terminated bytes.
 XRStereoCallback = ctypes.CFUNCTYPE(
     None,
-    ctypes.c_char_p,
-    ctypes.c_char_p,
-    ctypes.c_char_p,
-    ctypes.c_char_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
     ctypes.c_double,
     ctypes.c_int,
     ctypes.c_int,
@@ -127,6 +156,14 @@ _SIGNATURES: dict[str, tuple[Any, tuple[Any, ...]]] = {
         _I,
         (_P, XRPoseCallback, XRVSyncCallback, XRImuCallback, XRStereoCallback),
     ),
+    # Exposure (Carina). Return types are not documented: int assumed and never checked.
+    "xr_device_provider_set_manual_exposure_carina": (_I, (_P, ctypes.c_float, _I)),
+    "xr_device_provider_set_auto_exposure_carina": (_I, (_P,)),
+    # Device control (docs: "Device Control", provider must be STARTED).
+    "xr_device_provider_get_brightness_level": (_I, (_P,)),
+    "xr_device_provider_set_brightness_level": (_I, (_P, _I)),
+    "xr_device_provider_get_film_mode": (_I, (_P, ctypes.POINTER(ctypes.c_float))),
+    "xr_device_provider_set_film_mode": (_I, (_P, ctypes.c_float)),
     "xr_camera_provider_get_camera_vid": (_I, (_I,)),
     "xr_camera_provider_get_camera_pid": (_I, (_I,)),
     "xr_camera_provider_create": (_P, (_I, _I)),
@@ -187,7 +224,7 @@ RESULT_CODES = {
     -2: "USB not connected or not accessible",
     -3: "USB read/write failed",
     -4: "not supported on this device",
-    -5: "no response from the device",
+    -5: "no response from the device (no ACK within 3 s; retrying is meaningful)",
 }
 USB_UNAVAILABLE_HINT = (
     " Check: (1) the USB driver is installed: VITURE's docs say it comes with 'SpaceWalker for "
@@ -281,26 +318,79 @@ class SdkBindings:
         self._check("get_gl_pose_carina", rc)
         return tuple(float(pose[i]) for i in range(7)), int(status.value)
 
-    def register_imu_callback(
-        self, handle: Any, on_imu: Callable[[tuple[float, ...], float], None]
+    def register_carina_callbacks(
+        self,
+        handle: Any,
+        on_imu: Callable[[tuple[float, ...], float], None] | None = None,
+        on_stereo: Callable[[bytes, int, int, float], None] | None = None,
     ) -> None:
-        """Register an IMU callback (``[ax, ay, az, gx, gy, gz]``, units UNVERIFIED).
+        """Register the IMU (``[ax, ay, az, gx, gy, gz]``, units UNVERIFIED) and/or the stereo
+        tracking-camera callback. Unused slots get no-op callbacks (the docs' example passes NULL;
+        we do not rely on that). One call replaces any earlier registration.
 
-        The other three callbacks are no-ops: whether the SDK accepts NULL is undocumented."""
+        ``on_stereo(left0_gray, width, height, sdk_timestamp)`` runs on an SDK thread and receives
+        a COPY of the left0 buffer (``width * height`` bytes, assumed tightly packed). The other
+        three buffers are not touched, so nothing else is copied and the callback stays short."""
 
         def _imu(ptr: Any, ts: float) -> None:
-            on_imu(tuple(float(ptr[i]) for i in range(6)), float(ts))
+            if on_imu is not None:
+                on_imu(tuple(float(ptr[i]) for i in range(6)), float(ts))
+
+        def _stereo(l0: Any, _r0: Any, _l1: Any, _r1: Any, ts: float, w: int, h: int) -> None:
+            if on_stereo is None or not l0 or w <= 0 or h <= 0:
+                return
+            on_stereo(ctypes.string_at(l0, w * h), int(w), int(h), float(ts))
 
         cbs = (
             XRPoseCallback(lambda _p, _t: None),
             XRVSyncCallback(lambda _t: None),
             XRImuCallback(_imu),
-            XRStereoCallback(lambda *_a: None),
+            XRStereoCallback(_stereo),
         )
         self._keepalive.extend(cbs)
         self._check(
             "register_callbacks_carina",
             self._fn("xr_device_provider_register_callbacks_carina")(handle, *cbs),
+        )
+
+    def register_imu_callback(
+        self, handle: Any, on_imu: Callable[[tuple[float, ...], float], None]
+    ) -> None:
+        self.register_carina_callbacks(handle, on_imu=on_imu)
+
+    # --- exposure and device control (all need the provider STARTED, per the docs) ------------
+
+    def set_manual_exposure(self, handle: Any, exposure_ms: float, gain: int) -> None:
+        """Docs: ``set_manual_exposure_carina(handle, 4.0f, 8)``; ms [0.01, 8.0], gain [0, 15]."""
+        # Return value not documented, so it is not checked.
+        self._fn("xr_device_provider_set_manual_exposure_carina")(
+            handle, float(exposure_ms), int(gain)
+        )
+
+    def set_auto_exposure(self, handle: Any) -> None:
+        self._fn("xr_device_provider_set_auto_exposure_carina")(handle)
+
+    def get_brightness_level(self, handle: Any) -> int:
+        level = int(self._fn("xr_device_provider_get_brightness_level")(handle))
+        if level < 0:  # docs: negative on failure
+            self._check("get_brightness_level", level)
+        return level
+
+    def set_brightness_level(self, handle: Any, level: int) -> None:
+        self._check(
+            "set_brightness_level",
+            self._fn("xr_device_provider_set_brightness_level")(handle, int(level)),
+        )
+
+    def get_film_mode(self, handle: Any) -> float:
+        out = ctypes.c_float(0.0)
+        rc = self._fn("xr_device_provider_get_film_mode")(handle, ctypes.pointer(out))
+        self._check("get_film_mode", rc)  # return code "not stated" in the docs; 0 assumed
+        return float(out.value)
+
+    def set_film_mode(self, handle: Any, voltage: float) -> None:
+        self._check(
+            "set_film_mode", self._fn("xr_device_provider_set_film_mode")(handle, float(voltage))
         )
 
     # --- pass-through camera ---------------------------------------------------------------
