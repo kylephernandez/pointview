@@ -1,0 +1,31 @@
+{
+    "callsign": "UAL2066",
+    "number": "2066",
+    "airline_code": "UAL",
+    "airport_codes": "KDEN-KGSP",
+    "_airport_codes_iata": "DEN-GSP",
+    "_airports": [
+        {
+            "name": "Denver International Airport",
+            "icao": "KDEN",
+            "iata": "DEN",
+            "location": "Denver",
+            "countryiso2": "US",
+            "lat": 39.861698,
+            "lon": -104.672997,
+            "alt_feet": 5431.0,
+            "alt_meters": 1655.37
+        },
+        {
+            "name": "Greenville Spartanburg International Airport",
+            "icao": "KGSP",
+            "iata": "GSP",
+            "location": "Greenville",
+            "countryiso2": "US",
+            "lat": 34.895699,
+            "lon": -82.218903,
+            "alt_feet": 964.0,
+            "alt_meters": 293.83
+        }
+    ]
+}
