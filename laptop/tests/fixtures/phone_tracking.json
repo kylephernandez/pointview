@@ -1,0 +1,16 @@
+{
+  "session": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dictionary": "DICT_6X6_1000",
+  "marker_id": 42,
+  "cells": [
+    "00000000",
+    "00110000",
+    "00101010",
+    "01001000",
+    "00001100",
+    "01001100",
+    "01110100",
+    "00000000"
+  ],
+  "state": "verifying"
+}

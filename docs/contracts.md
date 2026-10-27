@@ -264,3 +264,53 @@ See the docstrings in `laptop/pointview/world.py`.
 * **Accuracy caveat:** the phone's GPS is good to ~5 m. Far geometry lines up well; geometry within ~30 m can be off by several degrees. Two things will improve it later:
   * 6DoF VIO for walking smoothness;
   * a "nudge" alignment, using a long-press on a building corner.
+
+## 12. Screen-based phone tracking (optional v1 extension)
+
+The earlier frozen interfaces remain compatible with manual Align. This feature adds optional
+`PhoneState.tracking_session`, `tracking_enabled`, `marker_size_m`,
+`Alignment.phone_to_tracking_quat`, and an optional `origin_world_m` argument to `world.choose_snap`.
+`phone_tracking.py` owns detection and camera/IMU agreement; `app.py` owns applying accepted results.
+
+* A new WebSocket connection creates a random `DICT_6X6_1000` marker ID and a random 128-bit session
+  tag. Status advertises the dictionary's **upright 8×8 cells**, including the black border. The
+  phone adds a white one-cell quiet zone. It must not mirror, rotate, stretch, or round the square.
+* The phone opts in by echoing that session in each motion sample. A legacy phone remains on manual
+  Align. The phone must not send tracking fields before receiving the extension, so it can still
+  connect to a legacy server. Wrong-session echoes cannot enable tracking. Reconnect clears old
+  samples/buttons and invalidates any visual reference; north calibration is retained.
+* Marker P coordinates are x right on screen, y toward the physical top edge, z out of the screen.
+  IPPE square points are `(-s,+s,0), (+s,+s,0), (+s,-s,0), (-s,-s,0)`, where `s` is half the black
+  square's side. Camera C uses the existing OpenCV axes. The existing C→H calibration and
+  exposure-time H→T pose give `Q_TP`; the accepted alignment is `Q_TR = Q_TP ⊗ inverse(Q_RP)`.
+* Frames must be ≤200 ms old, have matching calibrated image dimensions and ≥20 px marker edges,
+  positive depth, a front-facing screen and ≤2 px RMS coordinate reprojection residual. Duplicate
+  IDs and materially different, similarly plausible planar poses are rejected. Images are reduced
+  to at most 960 px width for detection; PnP uses the full-resolution intrinsics/corners.
+* Phone samples must bracket exposure time, with no gap >80 ms. Detection runs at most 20 Hz on
+  distinct frames. Acquisition/reacquisition requires at least four observations over 250–800 ms
+  and ≥6° net phone rotation. The body-relative camera rotation (head motion removed), integrated
+  body gyro and attitude change must agree within `2° + 0.15 × motion_degrees`. A stationary match
+  cannot acquire. Failed agreement clears verification, preserving the last inertial reference.
+* After acquisition, accepted observations continuously refresh the full R→T rotation. Out of view,
+  that rotation stays fixed while new phone attitude/gyro samples drive the pointer; stale or
+  disconnected samples still hide it. There is no promise of zero drift when out of view.
+* Compass heading never enters the visual pointer rotation. When north is unknown, a heading with
+  reported accuracy ≤25° may initialize north, away from near-vertical pointing. Visual updates
+  preserve an established compass/landmark north. Geographic layers/mesh wait for north; detection
+  pointing can work without it. Manual Align and long-press landmark north remain available.
+* Physical marker width is optional, measured **across the black square, excluding the white quiet
+  zone**, in 20–200 mm. Without it only orientation is used. With it, the marker centre estimates
+  the pointer-ray origin; distance must be 0.1–2 m. Translation is usable for ≤200 ms and only while
+  verified. A known-distance entity is tested from this origin (`distance × direction − origin`),
+  and a snapped ring is drawn at that entity's eye-relative direction. Unknown-distance entities
+  use the original angular test. Inertial fallback never extrapolates hand position.
+
+Translation currently treats the camera centre as the eye origin: camera-to-eye translation and
+head translation are unmeasured. Target distances and camera calibration can also be approximate.
+This reduces parallax error; it does not guarantee its elimination. Sensor axes, camera latency,
+rolling shutter, screen glare and planar-pose ambiguity require hardware validation.
+
+The random marker and correlated movement help reject unrelated screens; **they do not authenticate
+an owner**, prevent a copied marker or secure an unencrypted WebSocket. The finite marker dictionary
+is not a secret. No camera frames are stored or uploaded by tracking.

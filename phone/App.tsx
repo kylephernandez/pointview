@@ -3,11 +3,13 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
 
+import { TrackingPattern } from './src/TrackingPattern';
+import { markerSizeMeters, TRACKING_HINT } from './src/tracking';
 import { AlignPressDetector, realTimers } from './src/buttons';
 import { playHaptic } from './src/haptics';
 import { PhoneLink, type LinkState } from './src/link';
 import { MessageBuilder } from './src/message';
-import { LOOKS, type LayerName, type LaptopMessage, type Look, type MarkerShape } from './src/protocol';
+import { LOOKS, type LayerName, type LaptopMessage, type Look, type MarkerShape, type TrackingTarget } from './src/protocol';
 import { defaultSettings, loadSettings, nextLook, saveSettings, statusMismatch } from './src/settings';
 import { startLocation, startMotion } from './src/sensors';
 import { asyncStore } from './src/storage';
@@ -50,6 +52,10 @@ export default function App() {
   });
   const [laptop, setLaptop] = useState<LaptopStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [track, setTrack] = useState(false);
+  const [target, setTarget] = useState<TrackingTarget | null>(null);
+  const [markerMm, setMarkerMm] = useState('');
+  const [patternSide, setPatternSide] = useState(0);
   const [layers, setLayers] = useState(builder.getLayers());
   const [look, setLook] = useState<Look>('normal');
   const [passthrough, setPassthrough] = useState(false);
@@ -72,11 +78,21 @@ export default function App() {
         createSocket: (url) => new WebSocket(url) as never,
         timers: realTimers,
         store: asyncStore,
-        onState: setLink,
+        onState: (state) => {
+          setLink(state);
+          if (state.status !== 'connected') {
+            setLaptop(null);
+            setTarget(null);
+            builder.setTracking(undefined);
+          }
+        },
         onConnected: () => builder.markLayersDirty(),
         onMessage: (m) => {
           if (m.type === 'haptic') playHaptic(m.style);
-          else setLaptop(m);
+          else {
+            setLaptop(m);
+            setTarget(m.tracking ?? null);
+          }
         },
       }),
     [builder],
@@ -123,6 +139,14 @@ export default function App() {
       phoneLink.stop();
     };
   }, [builder, phoneLink]);
+
+  useEffect(() => {
+    builder.setTracking(target ? {
+      session: target.session,
+      enabled: track && patternSide > 0,
+      marker_size_m: markerSizeMeters(markerMm),
+    } : undefined);
+  }, [builder, target, track, markerMm, patternSide]);
 
   const persist = () =>
     void saveSettings(asyncStore, {
@@ -189,7 +213,7 @@ export default function App() {
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
-      <View style={styles.top}>
+      <View style={[styles.top, track && styles.trackTop]}>
         <Text style={styles.build}>{`PointView phone · build ${APP_BUILD}`}</Text>
         <Pressable onPress={() => setManualOpen((o) => !o)} accessibilityLabel="Connection status">
           <Text style={[styles.linkText, connected ? styles.ok : styles.warn]}>{linkText}</Text>
@@ -237,86 +261,121 @@ export default function App() {
         )}
 
         <Pressable
-          style={({ pressed }) => [styles.align, pressed && styles.alignPressed]}
-          onPressIn={() => align.pressIn()}
-          onPressOut={() => align.pressOut()}
-          accessibilityLabel="Align. Tap to align, hold to align on landmark"
+          style={styles.settingsBtn}
+          onPress={() => { setTrack((on) => !on); setSettingsOpen(false); }}
+          accessibilityLabel="Track phone with the glasses camera"
+          accessibilityState={{ selected: track }}
         >
-          <Text style={styles.alignText}>ALIGN</Text>
-          <Text style={styles.alignHint}>hold = landmark</Text>
+          <Text style={styles.settingsText}>{track ? 'STOP TRACKING' : 'TRACK'}</Text>
         </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [styles.settingsBtn, pressed && styles.settingsBtnPressed]}
-          onPress={() => setSettingsOpen((o) => !o)}
-          accessibilityLabel="Settings: looks, passthrough, mesh, markers, layers"
-          accessibilityState={{ expanded: settingsOpen }}
-        >
-          <Text style={styles.settingsText}>{settingsOpen ? 'SETTINGS ▲' : 'SETTINGS ▼'}</Text>
-        </Pressable>
+        {track ? (
+          <>
+            <Text style={styles.stat}>{target ? TRACKING_HINT[target.state] : 'Waiting for a tracking-capable laptop...'}</Text>
+            <View style={styles.patternArea} onLayout={({ nativeEvent }) => {
+              const side = Math.floor(Math.min(nativeEvent.layout.width, nativeEvent.layout.height));
+              if (patternSide !== side) {
+                setMarkerMm(''); // physical scale changed; remeasure
+                setPatternSide(side);
+              }
+            }}>
+              {connected && target && patternSide > 0 && <TrackingPattern target={target} side={patternSide} />}
+            </View>
+            <View style={styles.manualRow}>
+              <Text style={styles.stat}>Black square width (mm):</Text>
+              <TextInput style={[styles.input, styles.sizeInput]} value={markerMm} onChangeText={setMarkerMm}
+                keyboardType="decimal-pad" placeholder="measure" placeholderTextColor="#667"
+                accessibilityLabel="Measured black tracking square width in millimeters" />
+            </View>
+            <Text style={styles.hint}>{markerSizeMeters(markerMm) === null
+              ? 'Optional: measure the black square (20–200 mm) for hand-position correction.'
+              : 'Size set · position correction only while the marker is tracked.'}</Text>
+          </>
+        ) : (
+          <>
+            <Pressable
+              style={({ pressed }) => [styles.align, pressed && styles.alignPressed]}
+              onPressIn={() => align.pressIn()}
+              onPressOut={() => align.pressOut()}
+              accessibilityLabel="Align. Tap to align, hold to align on landmark"
+            >
+              <Text style={styles.alignText}>ALIGN</Text>
+              <Text style={styles.alignHint}>hold = landmark</Text>
+            </Pressable>
 
-        {settingsOpen && (
-          <ScrollView style={styles.settings} contentContainerStyle={styles.settingsContent}>
-            <View style={styles.looks}>
-              {LOOKS.map((l) => (
-                <Pressable
-                  key={l}
-                  style={[styles.lookBtn, look === l && styles.lookBtnOn]}
-                  onPress={() => chooseLook(l)}
-                  accessibilityLabel={`Look ${l}`}
-                  accessibilityState={{ selected: look === l }}
-                >
-                  <Text style={[styles.lookText, look === l && styles.lookTextOn]}>{l.toUpperCase()}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.ptRow}>
-              <Text style={styles.toggleText}>Passthrough (camera behind overlay)</Text>
-              <Switch value={passthrough} onValueChange={choosePassthrough} />
-            </View>
-            <Text style={styles.hint}>Looks only show over passthrough.</Text>
-            <View style={styles.ptRow}>
-              <Text style={styles.toggleText}>World mesh (wireframe of the surroundings)</Text>
-              <Switch value={layers.mesh} onValueChange={(v) => toggle('mesh', v)} />
-            </View>
-            <View style={styles.ptRow}>
-              <Text style={styles.toggleText}>Tracked objects as</Text>
-              <View style={styles.markers}>
-                {(['square', 'point'] as const).map((m) => (
-                  <Pressable
-                    key={m}
-                    style={[styles.markerBtn, marker === m && styles.lookBtnOn]}
-                    onPress={() => chooseMarker(m)}
-                    accessibilityLabel={`Marker ${m}`}
-                    accessibilityState={{ selected: marker === m }}
-                  >
-                    <Text style={[styles.lookText, marker === m && styles.lookTextOn]}>
-                      {m.toUpperCase()}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
+            <Pressable
+              style={({ pressed }) => [styles.settingsBtn, pressed && styles.settingsBtnPressed]}
+              onPress={() => setSettingsOpen((o) => !o)}
+              accessibilityLabel="Settings: looks, passthrough, mesh, markers, layers"
+              accessibilityState={{ expanded: settingsOpen }}
+            >
+              <Text style={styles.settingsText}>{settingsOpen ? 'SETTINGS ▲' : 'SETTINGS ▼'}</Text>
+            </Pressable>
 
-            {LAYER_GROUPS.map((g) => (
-              <View key={g.title}>
-                <Text style={styles.groupTitle}>{g.title}</Text>
-                <View style={styles.toggles}>
-                  {g.items.map(([name, label]) => (
-                    <View key={name} style={styles.toggle}>
-                      <Text style={styles.toggleText}>{label}</Text>
-                      <Switch value={layers[name]} onValueChange={(v) => toggle(name, v)} />
-                    </View>
+            {settingsOpen && (
+              <ScrollView style={styles.settings} contentContainerStyle={styles.settingsContent}>
+                <View style={styles.looks}>
+                  {LOOKS.map((l) => (
+                    <Pressable
+                      key={l}
+                      style={[styles.lookBtn, look === l && styles.lookBtnOn]}
+                      onPress={() => chooseLook(l)}
+                      accessibilityLabel={`Look ${l}`}
+                      accessibilityState={{ selected: look === l }}
+                    >
+                      <Text style={[styles.lookText, look === l && styles.lookTextOn]}>{l.toUpperCase()}</Text>
+                    </Pressable>
                   ))}
                 </View>
-              </View>
-            ))}
-          </ScrollView>
+                <View style={styles.ptRow}>
+                  <Text style={styles.toggleText}>Passthrough (camera behind overlay)</Text>
+                  <Switch value={passthrough} onValueChange={choosePassthrough} />
+                </View>
+                <Text style={styles.hint}>Looks only show over passthrough.</Text>
+                <View style={styles.ptRow}>
+                  <Text style={styles.toggleText}>World mesh (wireframe of the surroundings)</Text>
+                  <Switch value={layers.mesh} onValueChange={(v) => toggle('mesh', v)} />
+                </View>
+                <View style={styles.ptRow}>
+                  <Text style={styles.toggleText}>Tracked objects as</Text>
+                  <View style={styles.markers}>
+                    {(['square', 'point'] as const).map((m) => (
+                      <Pressable
+                        key={m}
+                        style={[styles.markerBtn, marker === m && styles.lookBtnOn]}
+                        onPress={() => chooseMarker(m)}
+                        accessibilityLabel={`Marker ${m}`}
+                        accessibilityState={{ selected: marker === m }}
+                      >
+                        <Text style={[styles.lookText, marker === m && styles.lookTextOn]}>
+                          {m.toUpperCase()}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+
+                {LAYER_GROUPS.map((g) => (
+                  <View key={g.title}>
+                    <Text style={styles.groupTitle}>{g.title}</Text>
+                    <View style={styles.toggles}>
+                      {g.items.map(([name, label]) => (
+                        <View key={name} style={styles.toggle}>
+                          <Text style={styles.toggleText}>{label}</Text>
+                          <Switch value={layers[name]} onValueChange={(v) => toggle(name, v)} />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </>
         )}
       </View>
 
       <Pressable
-        style={({ pressed }) => [styles.info, pressed && styles.infoPressed]}
+        style={({ pressed }) => [styles.info, track && styles.trackInfo, pressed && styles.infoPressed]}
         onPressIn={() => builder.pressButton('info')}
         accessibilityLabel="Info"
       >
@@ -327,11 +386,15 @@ export default function App() {
 }
 
 /** Shown on screen so you can tell which version Expo Go loaded. Bump on every UI change. */
-const APP_BUILD = '2026-10-27b (ALIGN + SETTINGS)';
+const APP_BUILD = '2026-10-27c (PHONE TRACKING)';
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000', paddingTop: 48, paddingBottom: 12 },
   top: { flex: 1, padding: 12, gap: 8 },
+  trackTop: { flex: 4 },
+  trackInfo: { flex: 1 },
+  patternArea: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 0 },
+  sizeInput: { paddingVertical: 4, fontSize: 14 },
   build: { color: '#6b7280', fontSize: 11 },
   linkText: { fontSize: 18, fontWeight: '600' },
   ok: { color: '#4ade80' },

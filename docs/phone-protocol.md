@@ -28,7 +28,7 @@ The iPhone pointer and the laptop talk over one WebSocket. The laptop is the ser
 | `buttons` | array | Presses since the previous message, in order: `info`, `align`, `align_long` (Align held for 600 ms or more). Each press is sent exactly once. |
 | `layers` | object, optional | `{people, vehicles, landmarks}` booleans. Send it whenever a toggle changes; the phone may also resend it. When it is omitted, the previous value stands. All layers start on. |
 
-Unknown fields are rejected (`additionalProperties: false`), so a protocol change needs a version bump.
+Unknown fields are rejected (`additionalProperties: false`). Breaking changes need a version bump; the optional screen-tracking extension below is only sent after the laptop advertises support.
 
 ### Building `quat` and `omega` in Expo Go
 
@@ -70,3 +70,36 @@ The laptop maps `t_ms` onto its own clock with a minimum-latency filter: `offset
 t_ms/1000)` over the last 2 s. Cursor prediction uses `ψ_now = ψ_sample + ω·(t_now − t_sample)`, capped at
 150 ms. A link counts as stalled after 50 ms without a sample. During a stall the cursor keeps extrapolating
 up to the cap, then holds.
+
+## Optional screen tracking extension
+
+New laptops add `tracking` to status messages (the normal status fields are still required):
+
+```json
+{"type":"status","aligned":false,"selected":null,"tracking":{
+  "session":"0123456789abcdef0123456789abcdef",
+  "dictionary":"DICT_6X6_1000","marker_id":42,
+  "cells":["00000000","00000000","00000000","00000000","00000000","00000000","00000000","00000000"],
+  "state":"searching"}}
+```
+
+The cells above illustrate the shape only; display **the actual received cells**, which encode the
+ID in the named OpenCV dictionary. `0` is black, `1` is white. The phone adds a one-cell white quiet
+zone outside this 8×8 square. The reference marker is in `laptop/tests/fixtures/phone_tracking.json`.
+
+A tracking-capable phone sends the following optional field **on every motion sample**, after it has
+received a target (in addition to the required v1 fields):
+
+```json
+{"tracking":{"session":"0123456789abcdef0123456789abcdef","enabled":true,"marker_size_m":0.060}}
+```
+
+`enabled` is true only in Track mode with a displayed pattern. `marker_size_m` is the measured black
+square's side in metres (0.020–0.200), or null for orientation only. Reconnecting clears the target;
+never carry the old session to a new connection. The laptop ignores an echo for another session.
+
+Status states are `off`, `searching`, `verifying` (rotate the phone gently), `tracked`, and `coasting`
+(last accepted alignment plus current phone sensors). Status is still sent at about 2 Hz; camera
+updates run up to 20 Hz independently. A missing `tracking` status field means a legacy laptop;
+continue manual Align and do not send extension fields. These negotiated optional fields extend v1;
+other unknown fields remain rejected. See contracts §12 for timing and validation thresholds.

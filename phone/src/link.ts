@@ -1,4 +1,5 @@
 // WebSocket link to the laptop: discovery, reconnect with backoff, send, receive.
+import { parseTrackingTarget } from './tracking';
 import type { TimerApi } from './buttons';
 import {
   Backoff,
@@ -85,6 +86,8 @@ export function parseLaptopMessage(data: unknown): LaptopMessage | null {
     if (typeof m.marker === 'string' && (MARKER_SHAPES as readonly string[]).includes(m.marker))
       out.marker = m.marker as MarkerShape;
     if (typeof m.passthrough === 'boolean') out.passthrough = m.passthrough;
+    const tracking = parseTrackingTarget(m.tracking);
+    if (tracking) out.tracking = tracking;
     return out;
   }
   return null;

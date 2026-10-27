@@ -473,3 +473,56 @@ def test_thread_wrapper_start_error_is_raised():
         with pytest.raises(OSError):
             busy.start()
         assert not busy.running()
+
+
+async def test_tracking_ack_is_session_bound_and_resets_on_reconnect(link, url):
+    async with connect(url) as ws:
+        await until(link.connected)
+        first = link.tracking_target()
+        await send_all(
+            ws,
+            sample(
+                1000, tracking={"session": first.session, "enabled": True, "marker_size_m": 0.06}
+            ),
+        )
+        await until(lambda: link.latest() is not None)
+        assert link.latest().tracking_enabled
+        assert link.latest().marker_size_m == 0.06
+        await link.send(
+            {
+                "type": "status",
+                "aligned": False,
+                "selected": None,
+                "tracking": {**first.message(), "state": "verifying"},
+            }
+        )
+        message = json.loads(await ws.recv())
+        assert message["tracking"]["session"] == first.session
+    await until(lambda: not link.connected())
+    async with connect(url) as ws:
+        await until(link.connected)
+        second = link.tracking_target()
+        assert second.session != first.session
+        assert link.latest() is None and link.history() == []
+        await send_all(
+            ws,
+            sample(
+                2000, tracking={"session": first.session, "enabled": True, "marker_size_m": 0.06}
+            ),
+        )
+        await until(lambda: link.latest() is not None)
+        assert not link.latest().tracking_enabled
+        assert link.latest().tracking_session is None
+        assert link.latest().marker_size_m is None
+
+
+@pytest.mark.parametrize("size", [0, -0.1, 0.001, 1, "0.06"])
+def test_bad_tracking_scale_is_rejected(size):
+    lk = PhoneLink()
+    lk._on_frame(
+        json.dumps(
+            sample(1000, tracking={"session": "a" * 32, "enabled": True, "marker_size_m": size})
+        )
+    )
+    assert lk.latest() is None
+    assert lk.stats().invalid == 1

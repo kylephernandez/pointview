@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 import numpy as np
@@ -38,6 +38,7 @@ from pointview.interfaces import (
     WireMesh,
     now,
 )
+from pointview.phone_tracking import PhoneTracker
 from pointview.scene import InfoContent, SceneInput, Status, build_scene, info_for
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,8 @@ class PointViewApp:
         self._last_status_t = -1e9
         self._fps_t0: float | None = None
         self._fps_frames = 0
+        self.tracker: PhoneTracker | None = None
+        self._tracking_size: float | None = None
 
     # ------------------------------------------------------------------------------------ actions
 
@@ -194,6 +197,71 @@ class PointViewApp:
             elif ev.name == "info":
                 self._info()
 
+    def _update_tracking(self, phone: PhoneState | None, fresh: bool, t: float) -> str:
+        target_fn = getattr(self.phone, "tracking_target", None)
+        if target_fn is None:
+            return "off"  # legacy/mock peers need no camera tracking
+        target = target_fn()
+        if self.tracker is None or self.tracker.target != target:
+            self.tracker = PhoneTracker(target)
+            if self.alignment.phone_to_tracking_quat is not None:
+                self.alignment = replace(
+                    self.alignment, aligned_at=None, phone_to_tracking_quat=None
+                )
+        tracker = self.tracker
+        active = (
+            fresh
+            and phone is not None
+            and phone.tracking_enabled
+            and phone.tracking_session == target.session
+        )
+        if not active:
+            tracker.reset_verification()
+            return "off" if phone is None or not phone.tracking_enabled else tracker.state(t)
+        if phone.marker_size_m != self._tracking_size:
+            tracker.reset_verification()
+            tracker.accepted = None  # never reuse translation from a different physical scale
+            self._tracking_size = phone.marker_size_m
+        try:
+            updated = tracker.update(
+                self.glasses,
+                [
+                    s
+                    for s in self.phone.history(2.0)
+                    if s.tracking_enabled and s.tracking_session == target.session
+                ],
+                self.calibration,
+                phone.marker_size_m,
+                t,
+            )
+        except Exception:
+            log.exception("phone marker tracking failed")
+            tracker.reset_verification()
+            return tracker.state(t)
+        if updated:
+            self.alignment = replace(
+                self.alignment, phone_to_tracking_quat=tracker.reference_quat, aligned_at=t
+            )
+        # North is independent of visual alignment; preserve an existing compass or landmark north.
+        if (
+            self.alignment.phone_to_tracking_quat is not None
+            and self.alignment.north_source == "none"
+            and phone.heading_deg is not None
+            and phone.heading_acc is not None
+            and phone.heading_acc <= 25
+        ):
+            yaw, pitch = world.pointer_ray(
+                phone.quat, replace(self.alignment, north_offset_deg=0.0)
+            )
+            if abs(pitch) < 75:  # yaw is unstable when the top edge is nearly vertical
+                self.alignment = replace(
+                    self.alignment,
+                    north_offset_deg=world.wrap_deg_signed(phone.heading_deg - yaw),
+                    north_source="compass",
+                    heading_acc_deg=phone.heading_acc,
+                )
+        return tracker.state(t)
+
     # -------------------------------------------------------------------------------------- frame
 
     def _info_content(self) -> InfoContent | None:
@@ -249,7 +317,14 @@ class PointViewApp:
         (without true north the wireframe would be rotated)."""
         if self.mesh_source is None or phone is None or phone.lat is None or phone.lon is None:
             return None
-        if not phone.layers.get("mesh", True) or self.alignment.aligned_at is None:
+        if (
+            not phone.layers.get("mesh", True)
+            or self.alignment.aligned_at is None
+            or (
+                self.alignment.phone_to_tracking_quat is not None
+                and self.alignment.north_source == "none"
+            )
+        ):
             return None
         mesh = self.mesh_source.mesh_near(phone.lat, phone.lon)
         if mesh is None:
@@ -287,7 +362,13 @@ class PointViewApp:
             enabled = frozenset(
                 k for name, k in LAYER_KINDS.items() if phone.layers.get(name, True)
             )
-        fresh = phone is not None and connected and t - phone.received_at < POINTER_TIMEOUT_S
+        fresh = phone is not None and connected and 0 <= t - phone.received_at < POINTER_TIMEOUT_S
+        tracking_state = self._update_tracking(phone, fresh, t)
+        if (
+            self.alignment.phone_to_tracking_quat is not None
+            and self.alignment.north_source == "none"
+        ):
+            enabled = enabled & {"person", "vehicle"}
         pointer = None
         if fresh and self.alignment.aligned_at is not None:
             pointer = self._pointer_world(phone, t)
@@ -324,11 +405,20 @@ class PointViewApp:
         self._handle_buttons(phone, t)
 
         if pointer is not None:
-            new = world.choose_snap(pointer[0], pointer[1], entities, self.snapped_id)
+            origin = None
+            if self.tracker is not None and fresh and phone.tracking_enabled:
+                origin = self.tracker.origin_world(t, self.alignment.north_offset_deg)
+            new = world.choose_snap(
+                pointer[0], pointer[1], entities, self.snapped_id, origin_world_m=origin
+            )
             if new is not None and new != self.snapped_id:
                 self.stats.snaps += 1
                 self._haptic("snap")
             self.snapped_id = new
+            if origin is not None and new is not None:
+                selected_entity = next(e for e in entities if e.id == new)
+                if selected_entity.distance_m is not None and selected_entity.distance_m > 0:
+                    pointer = (selected_entity.world_yaw_deg, selected_entity.world_pitch_deg)
         else:
             self.snapped_id = None
 
@@ -341,6 +431,7 @@ class PointViewApp:
             alignment=self.alignment,
             since_align_s=(t - self.alignment.aligned_at) if self.alignment.aligned_at else None,
             heading_acc_deg=phone.heading_acc if phone else None,
+            note=f"Track: {tracking_state}" if tracking_state != "off" else None,
         )
         self.items = build_scene(
             SceneInput(
@@ -385,6 +476,11 @@ class PointViewApp:
                         "fps": round(self.stats.fps, 1),
                         "look": look,
                         "passthrough": passthrough,
+                        **(
+                            {"tracking": {**self.tracker.target.message(), "state": tracking_state}}
+                            if self.tracker
+                            else {}
+                        ),
                     }
                 )
             except Exception:

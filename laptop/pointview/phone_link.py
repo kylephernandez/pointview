@@ -57,6 +57,7 @@ from pointview.interfaces import (
     Quat,
     now,
 )
+from pointview.phone_tracking import TrackingTarget
 
 _OFFSET_WINDOW_S = 2.0
 _RATE_WINDOW_S = 1.0
@@ -131,6 +132,7 @@ class PhoneLink:
         self._history_s = history_s
         self._stall_s = stall_ms / 1000.0
         self._lock = threading.RLock()
+        self._tracking_target = TrackingTarget.create()
         self._server: Server | None = None
         self._ws: ServerConnection | None = None
         self._latest: PhoneState | None = None
@@ -188,7 +190,11 @@ class PhoneLink:
         with self._lock:
             old, self._ws = self._ws, ws
             self._connections += 1
-            # New phone, possibly a different clock: restart timing state (keep layers and buttons).
+            self._tracking_target = TrackingTarget.create()
+            self._latest = None
+            self._history.clear()
+            self._buttons.clear()
+            # New phone, possibly a different clock: restart timing state and keep only display preferences.
             self._offsets.clear()
             self._rx_times.clear()
             self._last_rx = self._clock()
@@ -241,6 +247,8 @@ class PhoneLink:
             self._look = msg.get("look", self._look)
             self._passthrough = msg.get("passthrough", self._passthrough)
             self._marker = msg.get("marker", self._marker)
+            tracking = msg.get("tracking", {})
+            tracking_current = tracking.get("session") == self._tracking_target.session
             buttons: tuple[ButtonName, ...] = tuple(msg["buttons"])
             state = PhoneState(
                 t_ms=float(msg["t_ms"]),
@@ -258,6 +266,9 @@ class PhoneLink:
                 look=self._look,
                 passthrough=self._passthrough,
                 marker=self._marker,
+                tracking_session=tracking.get("session") if tracking_current else None,
+                tracking_enabled=bool(tracking_current and tracking.get("enabled", False)),
+                marker_size_m=tracking.get("marker_size_m") if tracking_current else None,
             )
             for name in buttons:
                 self._buttons.append(ButtonEvent(name=name, t_ms=state.t_ms, t=t))
@@ -265,6 +276,10 @@ class PhoneLink:
             self._history.append(state)
             while self._history and self._history[0].t < t - self._history_s:
                 self._history.popleft()
+
+    def tracking_target(self) -> TrackingTarget:
+        with self._lock:
+            return self._tracking_target
 
     # ------------------------------------------------------------------ PhoneLinkAPI
 
@@ -388,6 +403,9 @@ class PhoneLinkThread:
         if loop is None or not self.link.connected():
             return
         asyncio.run_coroutine_threadsafe(self.link.send(message), loop)
+
+    def tracking_target(self) -> TrackingTarget:
+        return self.link.tracking_target()
 
     # Thread-safe pass-throughs (PhoneLink guards its state with a lock).
     def latest(self) -> PhoneState | None:

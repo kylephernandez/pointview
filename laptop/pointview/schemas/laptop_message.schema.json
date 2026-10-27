@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/kylephernandez/pointview/schemas/laptop_message.schema.json",
-  "title": "PointView laptop → phone message",
+  "title": "PointView laptop \u2192 phone message",
   "description": "Sent by the laptop on the same WebSocket. See docs/phone-protocol.md.",
   "oneOf": [
     {
@@ -73,6 +73,49 @@
             "point",
             "square"
           ]
+        },
+        "tracking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session",
+            "dictionary",
+            "marker_id",
+            "cells",
+            "state"
+          ],
+          "properties": {
+            "session": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "dictionary": {
+              "const": "DICT_6X6_1000"
+            },
+            "marker_id": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999
+            },
+            "cells": {
+              "type": "array",
+              "minItems": 8,
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "pattern": "^[01]{8}$"
+              }
+            },
+            "state": {
+              "enum": [
+                "off",
+                "searching",
+                "verifying",
+                "tracked",
+                "coasting"
+              ]
+            }
+          }
         }
       }
     }

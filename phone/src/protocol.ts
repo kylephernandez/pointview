@@ -60,6 +60,17 @@ export interface PhoneMessage {
   passthrough?: boolean;
   /** Tracked-object style; omitted = unchanged. */
   marker?: MarkerShape;
+  /** Echoed every sample; opt-in only, tied to the laptop's current session. */
+  tracking?: { session: string; enabled: boolean; marker_size_m: number | null };
+}
+
+export interface TrackingTarget {
+  session: string;
+  dictionary: 'DICT_6X6_1000';
+  marker_id: number;
+  /** Eight rows, black=0 / white=1, including the one-cell black border. */
+  cells: string[];
+  state: 'off' | 'searching' | 'verifying' | 'tracked' | 'coasting';
 }
 
 export type HapticStyle = 'snap' | 'select' | 'align_ok' | 'error';
@@ -75,4 +86,5 @@ export type LaptopMessage =
       look?: Look;
       passthrough?: boolean;
       marker?: MarkerShape;
+      tracking?: TrackingTarget;
     };

@@ -267,3 +267,34 @@ or better). All of them need internet through the hotspot.
     Python shell, with `VitureGlasses` started.
     *Expected:* the lenses darken and the display dims. Record which film values change anything (the
     film may be on/off only).
+
+## Phone screen tracking
+
+This feature is experimental until these checks pass on the actual rig. Keep manual Align as a fallback.
+
+1. Calibrate the front camera intrinsics, distortion and camera/display rotation first. Verify the
+   delivered image dimensions match the calibration. Verify phone `quat` and body-frame `omega`
+   axes/signs and camera exposure timestamps (existing M1/M2 checks); callbacks are not exact sensor
+   timestamps and Wi-Fi delay can bias clock mapping.
+2. Connect the phone and tap **TRACK**. With its top edge upright, show the complete black square and
+   white border to the glasses. The square must occupy at least 20 camera pixels per edge. Rotate
+   the phone gently by more than 6° in under 0.8 s; expect `verifying` then `tracked`. A motionless
+   screen must not acquire. Try several tilt/yaw/roll angles and move the head independently.
+3. Without tapping Align, aim at known objects, turn the head, then rotate the phone; verify pointing
+   axes and alignment remain correct. A compass failure must not prevent relative pointing. Once
+   compass/landmark north is set, camera updates must not rotate the world mesh or landmarks.
+4. Occlude or turn the screen away. Expect `coasting`: new phone rotation still moves the pointer,
+   while hand translation correction stops. Reacquire with gentle movement; check recovery without
+   jumps. Stop phone samples/disconnect: expect the pointer to disappear. Reconnect: expect a new
+   session/pattern and a fresh verification, never reuse an old visual alignment.
+5. Show another ArUco ID, two copies of the current ID, or a copy moving differently from the phone.
+   None may refresh the alignment. A copied code with deliberately synchronized motion is outside
+   this heuristic's guarantees; it is not an ownership/authentication check.
+6. With the screen layout settled, measure the black square across its outer black border, excluding
+   the white margin, and enter its width (20–200 mm). Compare pointing at known 5–15 m targets with
+   the hand near eye level and ~40 cm lower. Known-distance selection should improve. Remove the
+   size or occlude the marker: no stale translation correction should remain. Account for the
+   camera-to-eye baseline, which is not currently calibrated.
+7. Repeat under daylight, glare and darkness. Increase screen brightness if needed and check for
+   overexposure/rolling-shutter artifacts. Record acquisition/reacquisition time, jitter, mismatch
+   rate, CPU/frame rate and camera-to-pointer latency; do not claim measured accuracy before this.

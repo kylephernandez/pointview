@@ -24,6 +24,7 @@ const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x
 export type FullLayers = Record<LayerName, boolean>;
 
 export class MessageBuilder {
+  private tracking: PhoneMessage['tracking'] = undefined;
   private buttons: ButtonName[] = [];
   private layers: FullLayers = Object.fromEntries(LAYER_NAMES.map((n) => [n, true])) as FullLayers;
   private look: Look = 'normal';
@@ -39,6 +40,10 @@ export class MessageBuilder {
   private headingAcc: number | null = null;
 
   constructor(private readonly resendMs = LAYERS_RESEND_MS) {}
+
+  setTracking(tracking: PhoneMessage['tracking']): void {
+    this.tracking = tracking;
+  }
 
   pressButton(b: ButtonName): void {
     this.buttons.push(b);
@@ -139,6 +144,7 @@ export class MessageBuilder {
       this.layersDirty = false;
       this.lastLayersSentAt = sample.t_ms;
     }
+    if (this.tracking) msg.tracking = { ...this.tracking };
     return msg;
   }
 

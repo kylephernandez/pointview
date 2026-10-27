@@ -154,6 +154,8 @@ class Alignment:
     north_source: Literal["none", "compass", "landmark"] = "none"
     #: Compass accuracy (degrees) at the time north was set, if from the compass.
     heading_acc_deg: float | None = None
+    #: Visual alignment: full R -> T rotation; None uses the original manual yaw offset.
+    phone_to_tracking_quat: Quat | None = None
 
 
 # ----------------------------------------------------------------------------------------- phone
@@ -221,6 +223,10 @@ class PhoneState:
     look: Look = "normal"
     #: Show the camera image behind the overlay (needed for looks to be visible).
     passthrough: bool = False
+    #: Opt-in screen tracking, echoed every sample and bound to the current connection.
+    tracking_session: str | None = None
+    tracking_enabled: bool = False
+    marker_size_m: float | None = None
 
 
 class PhoneLinkAPI(Protocol):

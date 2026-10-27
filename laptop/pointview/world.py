@@ -409,7 +409,12 @@ def align_north_to_landmark(
 
 def pointer_ray(phone_quat: Quat, alignment: Alignment) -> tuple[float, float]:
     """(world_yaw_deg, world_pitch_deg) of the pointer: the phone's top edge rotated by
-    phone_to_head_deg (into T) and north_offset_deg (into W). Pitch is unchanged by alignment."""
+    phone_to_head_deg (into T) and north_offset_deg (into W). Visual alignment uses the full
+    phone_to_tracking_quat instead; manual yaw alignment leaves pitch unchanged."""
+    if alignment.phone_to_tracking_quat is not None:
+        direction = quat_rotate(alignment.phone_to_tracking_quat, phone_pointer_vector(phone_quat))
+        yaw, pitch = yaw_pitch_from_vector(direction)
+        return wrap_deg(yaw + alignment.north_offset_deg), pitch
     yaw, pitch = yaw_pitch_from_vector(phone_pointer_vector(phone_quat))
     return wrap_deg(yaw + alignment.phone_to_head_deg + alignment.north_offset_deg), pitch
 
@@ -440,19 +445,29 @@ def choose_snap(
     current_id: str | None,
     radius_deg: float = SNAP_RADIUS_DEG,
     hysteresis_deg: float = SNAP_HYSTERESIS_DEG,
+    origin_world_m: Vec3 | None = None,
 ) -> str | None:
     """Which entity the pointer is snapped to (design doc step 6).
 
     Candidates are entities within radius_deg of the pointer. If current_id is still a candidate,
     keep it unless another candidate is at least hysteresis_deg closer. Otherwise pick the closest
     candidate. None if there are no candidates. Ties break by entity id (deterministic).
+    A fresh origin_world_m corrects known-distance target directions for hand-to-eye parallax;
+    without a target distance the original eye-relative angular comparison is retained.
     """
     pv = vector_from_yaw_pitch(pointer_yaw_deg, pointer_pitch_deg)
     best_id: str | None = None
     best_d = 0.0
     current_d: float | None = None
     for e in entities:
-        d = _angle_between(pv, vector_from_yaw_pitch(e.world_yaw_deg, e.world_pitch_deg))
+        direction = vector_from_yaw_pitch(e.world_yaw_deg, e.world_pitch_deg)
+        if origin_world_m is not None and e.distance_m is not None and e.distance_m > 0:
+            direction = tuple(
+                e.distance_m * v - o for v, o in zip(direction, origin_world_m, strict=True)
+            )
+            if sum(v * v for v in direction) < _EPS:
+                continue
+        d = _angle_between(pv, direction)
         if d > radius_deg:
             continue
         if e.id == current_id:
