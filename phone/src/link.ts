@@ -12,7 +12,7 @@ import {
   type SocketFactory,
   type WebSocketLike,
 } from './discovery';
-import type { HapticStyle, LaptopMessage } from './protocol';
+import { LOOKS, type HapticStyle, type LaptopMessage, type Look } from './protocol';
 
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
@@ -66,16 +66,28 @@ export function parseLaptopMessage(data: unknown): LaptopMessage | null {
   if (m.type === 'status' && typeof m.aligned === 'boolean') {
     const sel = m.selected;
     if (sel !== null && sel !== undefined && typeof sel !== 'string') return null;
-    const out: LaptopMessage = { type: 'status', aligned: m.aligned, selected: sel ?? null };
+    const out: LaptopMessage = {
+      type: 'status',
+      aligned: m.aligned,
+      selected: sel ?? null,
+    };
     if (typeof m.fps === 'number') out.fps = m.fps;
     if (typeof m.message === 'string') out.message = m.message;
+    if (typeof m.look === 'string' && (LOOKS as readonly string[]).includes(m.look))
+      out.look = m.look as Look;
+    if (typeof m.passthrough === 'boolean') out.passthrough = m.passthrough;
     return out;
   }
   return null;
 }
 
 export class PhoneLink {
-  private state: LinkState = { status: 'idle', address: null, needsManual: false, attempts: 0 };
+  private state: LinkState = {
+    status: 'idle',
+    address: null,
+    needsManual: false,
+    attempts: 0,
+  };
   private socket: WebSocketLike | null = null;
   private retryHandle: unknown = null;
   private generation = 0;
@@ -141,7 +153,7 @@ export class PhoneLink {
   }
 
   getManualAddress(): string | null {
-    return this.manual ? formatAddress(this.manual) : (this.lastGood ? formatAddress(this.lastGood) : null);
+    return this.manual ? formatAddress(this.manual) : this.lastGood ? formatAddress(this.lastGood) : null;
   }
 
   reconnectNow(): void {
@@ -191,7 +203,10 @@ export class PhoneLink {
     if (found) {
       this.adopt(found.socket, found.address, gen);
     } else {
-      this.setState({ status: 'waiting', needsManual: this.state.needsManual || scanned });
+      this.setState({
+        status: 'waiting',
+        needsManual: this.state.needsManual || scanned,
+      });
       this.scheduleRetry(gen);
     }
   }

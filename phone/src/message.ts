@@ -2,6 +2,7 @@
 import {
   LAYER_NAMES,
   PROTOCOL_VERSION,
+  type Look,
   type ButtonName,
   type LayerName,
   type Layers,
@@ -24,6 +25,9 @@ export type FullLayers = Record<LayerName, boolean>;
 export class MessageBuilder {
   private buttons: ButtonName[] = [];
   private layers: FullLayers = Object.fromEntries(LAYER_NAMES.map((n) => [n, true])) as FullLayers;
+  private look: Look = 'normal';
+  private passthrough = false;
+  // Layers, look and passthrough travel together: first message, on change, and every resendMs.
   private layersDirty = true;
   private lastLayersSentAt = -Infinity;
   private lat: number | null = null;
@@ -47,6 +51,28 @@ export class MessageBuilder {
       this.layers = { ...this.layers, [name]: on };
       this.layersDirty = true;
     }
+  }
+
+  setLook(look: Look): void {
+    if (this.look !== look) {
+      this.look = look;
+      this.layersDirty = true;
+    }
+  }
+
+  getLook(): Look {
+    return this.look;
+  }
+
+  setPassthrough(on: boolean): void {
+    if (this.passthrough !== on) {
+      this.passthrough = on;
+      this.layersDirty = true;
+    }
+  }
+
+  getPassthrough(): boolean {
+    return this.passthrough;
   }
 
   getLayers(): FullLayers {
@@ -94,6 +120,8 @@ export class MessageBuilder {
     };
     if (this.layersDirty || sample.t_ms - this.lastLayersSentAt >= this.resendMs) {
       msg.layers = { ...this.layers } as Layers;
+      msg.look = this.look;
+      msg.passthrough = this.passthrough;
       this.layersDirty = false;
       this.lastLayersSentAt = sample.t_ms;
     }
