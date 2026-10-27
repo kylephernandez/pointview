@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import numpy as np
 import pytest
 
 from pointview import world
@@ -11,9 +12,11 @@ from pointview.app import PointViewApp
 from pointview.entities import Entity
 from pointview.interfaces import (
     LAYER_KINDS,
+    Backdrop,
     ButtonEvent,
     CameraIntrinsics,
     Crosshair,
+    Frame,
     InfoCard,
     PhoneState,
 )
@@ -235,3 +238,83 @@ def test_stale_phone_hides_pointer(rig):
     phone.state = replace(phone.state, received_at=clock.t - 5)
     app.tick()
     assert app.snapped_id is None
+
+
+# ---------------------------------------------------------------------------- v2: live + looks
+
+
+def test_live_entities_only_inside_glasses_view(rig):
+    app, phone, layer, _ = rig
+    near = Entity("ac:1", "aircraft", "UAL1", HEAD_YAW + 10.0, 2.0, 0.0)  # in view (north 0)
+    behind = Entity("ac:2", "aircraft", "UAL2", HEAD_YAW + 180.0, 2.0, 0.0)
+    layer.entities = [near, behind, TOWER]  # the tower is outside view but not live: kept
+    phone.point(0.0)
+    app.tick()
+    assert {e.id for e in app.entities} == {"ac:1", TOWER.id}
+    assert layer.last_ctx.view is not None and abs(layer.last_ctx.view.yaw_deg - HEAD_YAW) < 1e-6
+
+
+def test_focus_id_and_pointer_reach_layers(rig):
+    app, phone, layer, clock = rig
+    phone.point(0.0, heading=90.0)
+    phone.press("align")
+    app.tick()
+    phone.point(10.0)  # tower
+    clock.t += 0.05
+    app.tick()
+    clock.t += 0.05
+    app.tick()
+    assert layer.last_ctx.focus_id == TOWER.id
+    assert layer.last_ctx.pointer is not None
+
+
+class FramedGlasses(FakeGlasses):
+    """FakeGlasses with a front camera frame and grayscale tracking frames."""
+
+    tracking_camera_intrinsics = CameraIntrinsics(300, 300, 160, 120, 320, 240)
+    tracking_camera_to_head_quat = (1.0, 0.0, 0.0, 0.0)
+
+    def latest_frame(self):
+        return Frame(99.0, np.full((480, 640, 3), 80, np.uint8))
+
+    def latest_tracking_frame(self):
+        return Frame(99.0, np.full((240, 320, 3), 200, np.uint8))
+
+    def set_tracking_exposure(self, exposure_ms, gain=None) -> None: ...
+
+
+@pytest.mark.parametrize(("look", "height"), [("normal", 480), ("nvg", 240)])
+def test_passthrough_backdrop_uses_the_right_viture_camera(look, height):
+    clock = Clock()
+    phone = FakePhone(clock)
+    app = PointViewApp(FramedGlasses(0.0), [], phone, None, clock=clock)
+    phone.point(0.0)
+    phone.state = replace(phone.state, look=look, passthrough=True)
+    items = app.tick()
+    assert isinstance(items[0], Backdrop) and items[0].bgr.shape[0] == height
+    # Same pose at capture and now: the camera centre lands on the display centre.
+    h = np.array(items[0].homography).reshape(3, 3)
+    cx, cy = (
+        (
+            FramedGlasses.camera_intrinsics
+            if look == "normal"
+            else FramedGlasses.tracking_camera_intrinsics
+        ).cx,
+        (
+            FramedGlasses.camera_intrinsics
+            if look == "normal"
+            else FramedGlasses.tracking_camera_intrinsics
+        ).cy,
+    )
+    p = h @ np.array([cx, cy, 1.0])
+    assert np.allclose(p[:2] / p[2], (960, 540), atol=1e-6)
+    status = [m for m in phone.sent if m["type"] == "status"]
+    assert status[-1]["look"] == look and status[-1]["passthrough"] is True
+
+
+def test_no_backdrop_without_passthrough():
+    clock = Clock()
+    phone = FakePhone(clock)
+    app = PointViewApp(FramedGlasses(0.0), [], phone, None, clock=clock)
+    phone.point(0.0)
+    assert not any(isinstance(i, Backdrop) for i in app.tick())
